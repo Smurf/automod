@@ -42,14 +42,13 @@ build_flavor() {
     esac
 
     log "sparta [$flavor]: make clean + $make_target"
-    rm -f "$SRCROOT/src"/sparta_* "$SRCROOT/src"/lmp_* 2>/dev/null || true
-    sl "clean prior sparta objects [$flavor]" "/tmp/sparta-$flavor-clean.log" "$SRCROOT/src" \
+    sl "clean prior sparta objects [$flavor]" "$LOGDIR/sparta-$flavor-clean.log" "$SRCROOT/src" \
         make clean-all
-    sl "compile sparta [$flavor] ($make_target)" "/tmp/sparta-$flavor-build.log" "$SRCROOT/src" \
+    sl "compile sparta [$flavor] ($make_target)" "$LOGDIR/sparta-$flavor-build.log" "$SRCROOT/src" \
         "${envs[@]}" make -j"$(nproc_avail)" "$make_target"
 
-    local built
-    built="$(find "$SRCROOT/src" -maxdepth 1 -type f -executable \( -name 'sparta_*' -o -name 'lmp_*' \) | head -1 || true)"
+    local built="$SRCROOT/src/spa_$make_target"
+    [ -x "$built" ] || built="$(find "$SRCROOT/src" -maxdepth 1 -type f -executable \( -name 'spa_*' -o -name 'sparta_*' -o -name 'lmp_*' \) | head -1 || true)"
     if [ -z "$built" ] || [ ! -x "$built" ]; then
         echo "ERROR: sparta binary not found after make" >&2
         ls -la "$SRCROOT/src" >&2 | head -30

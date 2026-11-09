@@ -23,13 +23,13 @@ mkdir -p /tmp/libfabric-shim/lib/pkgconfig
 pcfile="$(find /usr/lib -name libfabric.pc | head -1)"
 sed '/^Libs.private:/d' "$pcfile" > /tmp/libfabric-shim/lib/pkgconfig/libfabric.pc
 
-sl "configure mpich (ch4:ofi over system libfabric, gcc)" /tmp/mpich-configure.log /tmp/build/mpich \
+sl "configure mpich (ch4:ofi over system libfabric, gcc)" "$LOGDIR/mpich-configure.log" /tmp/build/mpich \
     env CC=gcc CXX=g++ FC=gfortran F77=gfortran F90=gfortran \
     ./configure --prefix="$PREFIX" --with-device=ch4:ofi --with-libfabric=/tmp/libfabric-shim \
     --enable-shared --without-x
 
-sl "compile mpich" /tmp/mpich-build.log /tmp/build/mpich make -j"$(nproc_avail)"
-sl "install mpich" /tmp/mpich-install.log /tmp/build/mpich make install
+sl "compile mpich" "$LOGDIR/mpich-build.log" /tmp/build/mpich make -j"$(nproc_avail)"
+sl "install mpich" "$LOGDIR/mpich-install.log" /tmp/build/mpich make install
 
 log "writing modulefile"
 write_module "$AUTOMOD_MODULEFILES/mpi/mpich/$MPICH_VERSION.lua" \

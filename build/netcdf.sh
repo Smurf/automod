@@ -39,12 +39,24 @@ build_flavor() {
         log "hdf5 [$flavor]: cached"
     else
         tarball="$(fetch "$HDF5_URL" "$HDF5_URL_ALT")"
-        rm -rf /tmp/build/hdf5 && mkdir -p /tmp/build/hdf5 && tar -C /tmp/build/hdf5 -xzf "$tarball" --strip-components=1
-        sl "configure hdf5 [$flavor]" "/tmp/hdf5-$flavor-configure.log" /tmp/build/hdf5 \
+        rm -rf /tmp/build/hdf5 && mkdir -p /tmp/build/hdf5 && tar -C /tmp/build/hdf5 -xzf "$tarball"
+        # GitHub release assets may nest the tree (hdf5-1.14.6/hdf5-1.14.6);
+        # hoist whichever directory actually holds configure.
+        if [ ! -f /tmp/build/hdf5/configure ]; then
+            # The true root configure sits at depth 1 (single-nested tarball) or
+            # 2 (double-nested GitHub release asset, e.g. hdf5-1.14.6/hdf5-1.14.6).
+            # Deeper matches are examples/sub-configures and must be skipped.
+            inner_dir="$(dirname "$(find /tmp/build/hdf5 -maxdepth 2 -type f -name configure | head -1)")"
+            [ -d "$inner_dir" ] || { echo "ERROR: hdf5 configure not found in $tarball" >&2; exit 1; }
+            mkdir -p /tmp/build/hdf5-hoist
+            mv "$inner_dir"/* ""/tmp/build/hdf5-hoist/"" || tar -C "$inner_dir" -cf - . | tar -C /tmp/build/hdf5-hoist -xf -
+            rm -rf /tmp/build/hdf5 && mv /tmp/build/hdf5-hoist /tmp/build/hdf5
+        fi
+        sl "configure hdf5 [$flavor]" "$LOGDIR/hdf5-$flavor-configure.log" /tmp/build/hdf5 \
             env CC="$cc" FC="$fc" ./configure --prefix="$HROOT" \
                 --enable-shared --disable-static --disable-fortran $hparallel
-        sl "compile hdf5 [$flavor]" "/tmp/hdf5-$flavor-build.log" /tmp/build/hdf5 make -j"$(nproc_avail)"
-        sl "install hdf5 [$flavor]" "/tmp/hdf5-$flavor-install.log" /tmp/build/hdf5 make install
+        sl "compile hdf5 [$flavor]" "$LOGDIR/hdf5-$flavor-build.log" /tmp/build/hdf5 make -j"$(nproc_avail)"
+        sl "install hdf5 [$flavor]" "$LOGDIR/hdf5-$flavor-install.log" /tmp/build/hdf5 make install
     fi
 
     # ---- netCDF-C ----
@@ -53,13 +65,13 @@ build_flavor() {
     else
         tarball="$(fetch "$NETCDF_C_URL" "$NETCDF_C_URL_ALT")"
         rm -rf /tmp/build/netcdf-c && mkdir -p /tmp/build/netcdf-c && tar -C /tmp/build/netcdf-c -xzf "$tarball" --strip-components=1
-        sl "configure netcdf-c [$flavor]" "/tmp/netcdf-c-$flavor-configure.log" /tmp/build/netcdf-c \
+        sl "configure netcdf-c [$flavor]" "$LOGDIR/netcdf-c-$flavor-configure.log" /tmp/build/netcdf-c \
             env CC="$cc" ./configure --prefix="$CROOT" \
-                --enable-shared --disable-static --disable-byterange $cparallel \
+                --enable-shared --disable-static --disable-byterange --disable-libxml2 $cparallel \
                 CPPFLAGS="-I$HROOT/include" \
                 LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib"
-        sl "compile netcdf-c [$flavor]" "/tmp/netcdf-c-$flavor-build.log" /tmp/build/netcdf-c make -j"$(nproc_avail)"
-        sl "install netcdf-c [$flavor]" "/tmp/netcdf-c-$flavor-install.log" /tmp/build/netcdf-c make install
+        sl "compile netcdf-c [$flavor]" "$LOGDIR/netcdf-c-$flavor-build.log" /tmp/build/netcdf-c make -j"$(nproc_avail)"
+        sl "install netcdf-c [$flavor]" "$LOGDIR/netcdf-c-$flavor-install.log" /tmp/build/netcdf-c make install
     fi
 
     # ---- netCDF-Fortran ----
@@ -68,13 +80,13 @@ build_flavor() {
     else
         tarball="$(fetch "$NETCDF_FORTRAN_URL" "$NETCDF_FORTRAN_URL_ALT")"
         rm -rf /tmp/build/netcdf-fortran && mkdir -p /tmp/build/netcdf-fortran && tar -C /tmp/build/netcdf-fortran -xzf "$tarball" --strip-components=1
-        sl "configure netcdf-fortran [$flavor]" "/tmp/netcdf-fortran-$flavor-configure.log" /tmp/build/netcdf-fortran \
+        sl "configure netcdf-fortran [$flavor]" "$LOGDIR/netcdf-fortran-$flavor-configure.log" /tmp/build/netcdf-fortran \
             env PATH="$CROOT/bin:$PATH" CC="$cc" FC="$fc" ./configure --prefix="$FROOT" \
                 --enable-shared --disable-static \
                 CPPFLAGS="-I$HROOT/include -I$CROOT/include" \
                 LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib -L$CROOT/lib -Wl,-rpath,$CROOT/lib"
-        sl "compile netcdf-fortran [$flavor]" "/tmp/netcdf-fortran-$flavor-build.log" /tmp/build/netcdf-fortran make -j"$(nproc_avail)"
-        sl "install netcdf-fortran [$flavor]" "/tmp/netcdf-fortran-$flavor-install.log" /tmp/build/netcdf-fortran make install
+        sl "compile netcdf-fortran [$flavor]" "$LOGDIR/netcdf-fortran-$flavor-build.log" /tmp/build/netcdf-fortran make -j"$(nproc_avail)"
+        sl "install netcdf-fortran [$flavor]" "$LOGDIR/netcdf-fortran-$flavor-install.log" /tmp/build/netcdf-fortran make install
     fi
 
     # ---- smoke test ----

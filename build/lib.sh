@@ -77,6 +77,10 @@ write_module() {
     info "wrote modulefile $target"
 }
 
+# Where build step logs are written; override with LOGDIR env var.
+export LOGDIR="${LOGDIR:-/tmp}"
+mkdir -p "$LOGDIR" 2>/dev/null || true
+
 nproc_avail() { nproc; }
 
 # sl: run <label> <logfile> <dir|-> <cmd...>; on failure dump the log tail and exit.

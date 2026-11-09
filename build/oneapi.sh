@@ -21,11 +21,11 @@ install_oneapi() {
         | gpg --dearmor --yes -o /usr/share/keyrings/intel-oneapi.gpg
     printf 'deb [ signed-by=/usr/share/keyrings/intel-oneapi.gpg ] https://apt.repos.intel.com/oneapi all main\n' \
         > /etc/apt/sources.list.d/intel-oneapi.list
-    sl "apt-get update (incl. intel repo)" /tmp/oneapi-apt-update.log - \
+    sl "apt-get update (incl. intel repo)" "$LOGDIR/oneapi-apt-update.log" - \
         bash -c 'apt-get update -o Dir::Etc::SourceParts=/etc/apt/sources.list.d -o APT::Get::List-Cleanup=0 || apt-get update'
 
     log "oneapi: installing compiler + mpi packages (this is a large download)"
-    sl "apt-get install oneapi packages" /tmp/oneapi-apt-install.log - \
+    sl "apt-get install oneapi packages" "$LOGDIR/oneapi-apt-install.log" - \
         env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             intel-oneapi-common-vars \
             intel-oneapi-compiler-dpcpp-cpp \
@@ -36,9 +36,10 @@ install_oneapi() {
 
 # Pick the newest installed version directory of a component.
 pick_ver() {
-    ls -1d "$ONEAPI_BASE/$1"/* 2>/dev/null | xargs -n1 basename | sort -V | tail -1
+    ls -1d "$ONEAPI_BASE/$1"/* 2>/dev/null | xargs -n1 basename 2>/dev/null | sort -V | tail -1
 }
 
+install_oneapi
 CVER="$(pick_ver compiler)"
 MVER="$(pick_ver mpi)"
 need_var CVER MVER

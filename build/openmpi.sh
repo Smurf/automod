@@ -14,15 +14,15 @@ tarball="$(fetch "$OPENMPI_URL")"
 log "unpacking openmpi"
 rm -rf /tmp/build/openmpi && mkdir -p /tmp/build/openmpi && cd /tmp/build/openmpi && tar -xzf "$tarball" --strip-components=1
 
-sl "configure openmpi (internal pmix/prrte/hwloc/libevent, gcc)" /tmp/openmpi-configure.log /tmp/build/openmpi \
+sl "configure openmpi (internal pmix/prrte/hwloc/libevent, gcc)" "$LOGDIR/openmpi-configure.log" /tmp/build/openmpi \
     env CC=gcc CXX=g++ FC=gfortran F77=gfortran F90=gfortran \
     ./configure --prefix="$PREFIX" \
         --with-libevent=internal --with-hwloc=internal \
         --with-pmix=internal --with-prrte=internal \
         --enable-shared --without-x
 
-sl "compile openmpi" /tmp/openmpi-build.log /tmp/build/openmpi make -j"$(nproc_avail)"
-sl "install openmpi" /tmp/openmpi-install.log /tmp/build/openmpi make install
+sl "compile openmpi" "$LOGDIR/openmpi-build.log" /tmp/build/openmpi make -j"$(nproc_avail)"
+sl "install openmpi" "$LOGDIR/openmpi-install.log" /tmp/build/openmpi make install
 
 log "writing modulefile"
 write_module "$AUTOMOD_MODULEFILES/mpi/openmpi/$OPENMPI_VERSION.lua" \
