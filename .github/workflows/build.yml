@@ -1,0 +1,80 @@
+name: build
+
+# Build the automod HPC module stack for both supported Ubuntu releases.
+# Each matrix job builds the custom container image for its release with
+# podman, then compiles + validates every module inside that container.
+# At the end the finished /opt/automod tree is uploaded as an artifact for
+# deployment to the cluster.
+
+on:
+  push:
+    branches: [main, master, initial]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # weekly rebuild to catch upstream changes
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  modules:
+    name: modules (ubuntu-${{ matrix.os }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: "24.04", suffix: "24.04" }
+          - { os: "26.04", suffix: "26.04" }
+    env:
+      TAG: automod:ubuntu-${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build container image (podman)
+        run: |
+          podman build --quiet -t "$TAG" \
+            -f "containers/ubuntu-${{ matrix.os }}/Containerfile" \
+            "containers/ubuntu-${{ matrix.os }}"
+
+      - name: image sanity check
+        run: |
+          podman run --rm --workdir /src -v "$PWD:/src" "$TAG" \
+            bash -c 'set -e; \
+                     gcc --version | grep -q ^gcc; \
+                     gfortran --version | grep -q ^GNU; \
+                     source /usr/share/lmod/lmod/init/bash && module --version'
+
+      - name: mpich module
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/mpich.sh
+
+      - name: openmpi module
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/openmpi.sh
+
+      - name: netcdf module (serial + mpich + openmpi)
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/netcdf.sh
+
+      - name: sparta module (serial + mpich + openmpi)
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/sparta.sh
+
+      - name: intel oneapi + intel mpi modules
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/oneapi.sh
+
+      - name: selftest (lmod loads every module)
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/selftest.sh
+
+      - name: package module tree
+        run: tar -czf "automod-modtree-ubuntu-${{ matrix.os }}.tar.gz" -C modtree .
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: automod-modtree-ubuntu-${{ matrix.os }}
+          path: automod-modtree-ubuntu-${{ matrix.os }}.tar.gz
+          if-no-files-found: error

@@ -5,9 +5,9 @@ set -euo pipefail
 AUTOMOD_PREFIX="${AUTOMOD_PREFIX:-/opt/automod}"
 AUTOMOD_MODULEFILES="$AUTOMOD_PREFIX/modulefiles"
 
-log()    { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
-info()   { printf '    %s\n' "$*"; }
-stamp()  { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
+log()    { printf '\n\033[1;36m==> %s\033[0m\n' "$*" >&2; }
+info()   { printf '    %s\n' "$*" >&2; }
+stamp()  { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >&2; }
 
 # Repo root (directory containing build/).
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
