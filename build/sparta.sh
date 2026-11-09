@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build SPARTA (SPARTA Monte Carlo / DSMC code, github.com/sparta/sparta)
-# as Lmod modules: a serial flavor and hierarchical flavors under each MPI:
+# Build SPARTA (DSMC Monte Carlo code, github.com/sparta/sparta) as Lmod
+# modules: a serial flavor and hierarchical flavors under each MPI:
 #   apps/sparta/<tag>-gnu.lua                (serial)
 #   mpi/mpich/<mpi>/sparta/<tag>.lua
 #   mpi/openmpi/<mpi>/sparta/<tag>.lua
@@ -23,7 +23,6 @@ unpack_once() {
 
 build_flavor() {
     local flavor="$1"   # gnu | mpich | openmpi
-    local exe="sparta_$flavor"
     local OUT="$AUTOMOD_PREFIX/software/sparta/$SPARTA_TAG/$flavor"
     if build_done "$OUT/bin/sparta"; then
         log "sparta [$flavor]: cached"
@@ -31,25 +30,33 @@ build_flavor() {
     fi
     unpack_once
 
-    log "sparta [$flavor]: make"
-    ( cd "$SRCROOT/src" && \
-        make clean-all > /dev/null 2>&1 || true && \
-        case "$flavor" in
-            gnu)     make -j"$(nproc_avail)" serial   > /tmp/sparta-gnu-build.log 2>&1 ;;
-            mpich)   PATH="$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin:$PATH" LD_LIBRARY_PATH="$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib" make -j"$(nproc_avail)" mpi > /tmp/sparta-mpich-build.log 2>&1 ;;
-            openmpi) PATH="$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin:$PATH" LD_LIBRARY_PATH="$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib" make -j"$(nproc_avail)" mpi > /tmp/sparta-openmpi-build.log 2>&1 ;;
-        esac )
+    local make_target envs=()
+    case "$flavor" in
+        gnu)     make_target=serial ;;
+        mpich)   make_target=mpi
+                 envs=(env "PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin:$PATH"
+                            "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib") ;;
+        openmpi) make_target=mpi
+                 envs=(env "PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin:$PATH"
+                            "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib") ;;
+    esac
+
+    log "sparta [$flavor]: make clean + $make_target"
+    rm -f "$SRCROOT/src"/sparta_* "$SRCROOT/src"/lmp_* 2>/dev/null || true
+    sl "clean prior sparta objects [$flavor]" "/tmp/sparta-$flavor-clean.log" "$SRCROOT/src" \
+        make clean-all
+    sl "compile sparta [$flavor] ($make_target)" "/tmp/sparta-$flavor-build.log" "$SRCROOT/src" \
+        "${envs[@]}" make -j"$(nproc_avail)" "$make_target"
 
     local built
-    built="$(ls -1 "$SRCROOT/src"/lmp* "$SRCROOT/src"/sparta* 2>/dev/null | head -1 || true)"
+    built="$(find "$SRCROOT/src" -maxdepth 1 -type f -executable \( -name 'sparta_*' -o -name 'lmp_*' \) | head -1 || true)"
     if [ -z "$built" ] || [ ! -x "$built" ]; then
         echo "ERROR: sparta binary not found after make" >&2
-        ls -la "$SRCROOT/src" >&2 | head -20
+        ls -la "$SRCROOT/src" >&2 | head -30
         exit 1
     fi
-    mkdir -p "$OUT/bin" "$OUT/lib"
+    mkdir -p "$OUT/bin"
     cp "$built" "$OUT/bin/sparta"
-    # lib/gzstream and friends get folded into the binary; nothing else to ship.
     info "sparta [$flavor]: installed $(basename "$built") -> $OUT/bin/sparta"
 }
 
@@ -57,19 +64,16 @@ run_smoke() {
     local flavor="$1"
     local OUT="$AUTOMOD_PREFIX/software/sparta/$SPARTA_TAG/$flavor"
     log "sparta [$flavor]: smoke test"
-    local out
+    local pre=()
     case "$flavor" in
-        gnu)     MP=() ;;
-        mpich)   MP=( "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin" "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib" ) ;;
-        openmpi) MP=( "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin" "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib" ) ;;
+        gnu)     ;;
+        mpich)   pre=(env "PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin:$PATH"
+                      "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib") ;;
+        openmpi) pre=(env "PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin:$PATH"
+                      "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib") ;;
     esac
-    if [ "${#MP[@]}" -gt 0 ]; then
-        out="$(PATH="${MP[0]}:$PATH" LD_LIBRARY_PATH="${MP[1]}:${LD_LIBRARY_PATH:-}" \
-              timeout 300 "$OUT/bin/sparta" < /dev/null 2>&1 || true)"
-    else
-        out="$(timeout 300 "$OUT/bin/sparta" < /dev/null 2>&1 || true)"
-    fi
-    echo "$out" | tee "/tmp/sparta-$flavor.out"
+    out="$(timeout 300 "${pre[@]}" "$OUT/bin/sparta" < /dev/null 2>&1 || true)"
+    printf '%s\n' "$out" | tail -5 > "/tmp/sparta-$flavor.out"
     case "$out" in
         *SPARTA*) info "sparta [$flavor]: banner ok" ;;
         *) echo "WARNING: sparta [$flavor] banner not detected" >&2 ;;

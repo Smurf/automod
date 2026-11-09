@@ -11,27 +11,29 @@ if build_done "$PREFIX/bin/mpicc"; then
 fi
 
 tarball="$(fetch "$MPICH_URL")"
-
 log "unpacking mpich"
-mkdir -p /tmp/build/mpich
-tar -C /tmp/build/mpich -xzf "$tarball" --strip-components=1
-cd /tmp/build/mpich
+rm -rf /tmp/build/mpich && mkdir -p /tmp/build/mpich && cd /tmp/build/mpich && tar -xzf "$tarball" --strip-components=1
 
-log "configuring mpich (ch4:ofi device, gcc toolchain)"
-CC=gcc CXX=g++ FC=gfortran F77=gfortran F90=gfortran \
-./configure --prefix="$PREFIX" \
-    --with-device=ch4:ofi \
-    --enable-shared \
-    --without-x \
-    > /tmp/mpich-configure.log 2>&1
+# Ubuntu ships all providers inside libfabric.so, but the distro libfabric.pc
+# still lists every provider's static deps on Libs.private (psm, verbs, efa...).
+# MPICH probes `pkg-config --static` and would append those to every future
+# mpicc link line, which breaks the build and later app builds. Install a
+# cleaned-up .pc shim and point --with-libfabric at it.
+mkdir -p /tmp/libfabric-shim/lib/pkgconfig
+pcfile="$(find /usr/lib -name libfabric.pc | head -1)"
+sed '/^Libs.private:/d' "$pcfile" > /tmp/libfabric-shim/lib/pkgconfig/libfabric.pc
 
-log "compiling mpich ($(nproc_avail) jobs)"
-make -j"$(nproc_avail)" > /tmp/mpich-build.log 2>&1
-make install > /tmp/mpich-install.log 2>&1
+sl "configure mpich (ch4:ofi over system libfabric, gcc)" /tmp/mpich-configure.log /tmp/build/mpich \
+    env CC=gcc CXX=g++ FC=gfortran F77=gfortran F90=gfortran \
+    ./configure --prefix="$PREFIX" --with-device=ch4:ofi --with-libfabric=/tmp/libfabric-shim \
+    --enable-shared --without-x
+
+sl "compile mpich" /tmp/mpich-build.log /tmp/build/mpich make -j"$(nproc_avail)"
+sl "install mpich" /tmp/mpich-install.log /tmp/build/mpich make install
 
 log "writing modulefile"
 write_module "$AUTOMOD_MODULEFILES/mpi/mpich/$MPICH_VERSION.lua" \
-    STACK="automod" PKG="mpich" VER="$MPICH_VERSION" PREFIX="$PREFIX" <<'LUA'
+    PKG="mpich" VER="$MPICH_VERSION" PREFIX="$PREFIX" <<'LUA'
 help([[MPICH %%VER%% (ch4/ofi device, gcc backend) built by the automod stack.]])
 whatis("Name: MPICH %%VER%%")
 whatis("Description: Message Passing Interface implementation, ch4 over libfabric")
@@ -47,15 +49,13 @@ prepend_path("CPATH",           pathJoin(root, "include"))
 prepend_path("LIBRARY_PATH",    pathJoin(root, "lib"))
 prepend_path("MANPATH",         pathJoin(root, "share", "man"))
 prepend_path("PKG_CONFIG_PATH", pathJoin(root, "lib", "pkgconfig"))
-prepend_path("MODULEPATH",      pathJoin(root, "modulefiles"))
 setenv("MPICH_ROOT", root)
 LUA
 
 log "smoke test: compile and run MPI hello with 2 ranks"
-cp "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" /tmp/mpi-hello.c
 export PATH="$PREFIX/bin:$PATH"
 export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
-"$PREFIX/bin/mpicc" /tmp/mpi-hello.c -o /tmp/mpi-hello
+"$PREFIX/bin/mpicc" "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/mpi-hello
 timeout 300 "$PREFIX/bin/mpirun" -n 2 /tmp/mpi-hello | sort | tee /tmp/mpi-hello.out
 grep -q "rank 1" /tmp/mpi-hello.out
 stamp "mpich $MPICH_VERSION OK"

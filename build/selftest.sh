@@ -29,12 +29,6 @@ check "module load netcdf" module load netcdf
 check "netcdf serial binary" /tmp/nc-rt-gnu
 module purge
 
-load_and_run() {
-    module load "$2/$3" || { echo "FAIL: load $2/$3"; fail=1; return 1; }
-    check "mpirun $1" "$AUTOMOD_PREFIX/software/$2/$3/bin/mpirun" -n 2 /tmp/$4
-    module purge
-}
-
 # Each MPI loads, then compiles+runs hello (mpicc/mpicxx).
 for pair in "mpich $MPICH_VERSION" "openmpi $OPENMPI_VERSION"; do
     read -r name ver <<< "$pair"

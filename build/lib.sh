@@ -77,3 +77,20 @@ write_module() {
 }
 
 nproc_avail() { nproc; }
+
+# sl: run <label> <logfile> <dir|-> <cmd...>; on failure dump the log tail and exit.
+sl() {
+    local label="$1" lf="$2" dir="$3"; shift 3
+    log "$label"
+    local rc=0
+    if [ "$dir" = "-" ]; then
+        "$@" > "$lf" 2>&1 || rc=$?
+    else
+        ( cd "$dir" && "$@" ) > "$lf" 2>&1 || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "ERROR: step '$label' failed (rc=$rc), log tail:" >&2
+        tail -n 60 "$lf" >&2 || true
+        exit "$rc"
+    fi
+}

@@ -11,30 +11,22 @@ if build_done "$PREFIX/bin/mpicc"; then
 fi
 
 tarball="$(fetch "$OPENMPI_URL")"
-
 log "unpacking openmpi"
-mkdir -p /tmp/build/openmpi
-tar -C /tmp/build/openmpi -xzf "$tarball" --strip-components=1
-cd /tmp/build/openmpi
+rm -rf /tmp/build/openmpi && mkdir -p /tmp/build/openmpi && cd /tmp/build/openmpi && tar -xzf "$tarball" --strip-components=1
 
-log "configuring openmpi (vendored hwloc/libevent/pmix/prrte, gcc toolchain)"
-CC=gcc CXX=g++ FC=gfortran F77=gfortran F90=gfortran \
-./configure --prefix="$PREFIX" \
-    --with-libevent=internal \
-    --with-hwloc=internal \
-    --with-pmix=internal \
-    --with-prrte=internal \
-    --enable-shared \
-    --without-x \
-    > /tmp/openmpi-configure.log 2>&1
+sl "configure openmpi (internal pmix/prrte/hwloc/libevent, gcc)" /tmp/openmpi-configure.log /tmp/build/openmpi \
+    env CC=gcc CXX=g++ FC=gfortran F77=gfortran F90=gfortran \
+    ./configure --prefix="$PREFIX" \
+        --with-libevent=internal --with-hwloc=internal \
+        --with-pmix=internal --with-prrte=internal \
+        --enable-shared --without-x
 
-log "compiling openmpi ($(nproc_avail) jobs)"
-make -j"$(nproc_avail)" > /tmp/openmpi-build.log 2>&1
-make install > /tmp/openmpi-install.log 2>&1
+sl "compile openmpi" /tmp/openmpi-build.log /tmp/build/openmpi make -j"$(nproc_avail)"
+sl "install openmpi" /tmp/openmpi-install.log /tmp/build/openmpi make install
 
 log "writing modulefile"
 write_module "$AUTOMOD_MODULEFILES/mpi/openmpi/$OPENMPI_VERSION.lua" \
-    STACK="automod" PKG="openmpi" VER="$OPENMPI_VERSION" PREFIX="$PREFIX" <<'LUA'
+    PKG="openmpi" VER="$OPENMPI_VERSION" PREFIX="$PREFIX" <<'LUA'
 help([[Open MPI %%VER%% (gcc backend, internal PMIx/PRRTE/hwloc/libevent) built by the automod stack.]])
 whatis("Name: Open MPI %%VER%%")
 whatis("Description: Message Passing Interface implementation")
@@ -49,7 +41,6 @@ prepend_path("CPATH",           pathJoin(root, "include"))
 prepend_path("LIBRARY_PATH",    pathJoin(root, "lib"))
 prepend_path("MANPATH",         pathJoin(root, "share", "man"))
 prepend_path("PKG_CONFIG_PATH", pathJoin(root, "lib", "pkgconfig"))
-prepend_path("MODULEPATH",      pathJoin(root, "modulefiles"))
 setenv("OMPI_ROOT", root)
 LUA
 

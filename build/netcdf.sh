@@ -10,76 +10,74 @@ set -euo pipefail
 
 setup_flavor_env() {
     case "$1" in
-        gnu)     echo "gcc:gfortran:" ;;
-        mpich)   echo "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin/mpicc:$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin/mpif90:$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib" ;;
-        openmpi) echo "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin/mpicc:$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin/mpif90:$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib" ;;
+        gnu)     printf 'gcc\ngfortran\n\n' ;;
+        mpich)   printf '%s\n%s\n%s\n' \
+                     "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin/mpicc" \
+                     "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin/mpif90" \
+                     "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib" ;;
+        openmpi) printf '%s\n%s\n%s\n' \
+                     "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin/mpicc" \
+                     "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin/mpif90" \
+                     "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib" ;;
         *) echo "unknown flavor '$1'" >&2; exit 1 ;;
     esac
 }
 
 build_flavor() {
     local flavor="$1"
-    local info cc fc mpilib
-    IFS=':' read -r cc fc mpilib <<< "$(setup_flavor_env "$flavor")"
+    local cc fc mpilib
+    { read -r cc; read -r fc; read -r mpilib; } < <(setup_flavor_env "$flavor")
 
     local HROOT="$AUTOMOD_PREFIX/software/hdf5/$HDF5_VERSION/$flavor"
     local CROOT="$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/$flavor"
     local FROOT="$AUTOMOD_PREFIX/software/netcdf-fortran/$NETCDF_FORTRAN_VERSION/$flavor"
+    local hparallel="" cparallel=""
+    if [ -n "$mpilib" ]; then hparallel="--enable-parallel"; cparallel="--enable-parallel4"; fi
 
-    # --- HDF5 ---
+    # ---- HDF5 ----
     if build_done "$HROOT/lib/libhdf5.so"; then
         log "hdf5 [$flavor]: cached"
     else
-        log "hdf5 [$flavor]: download + configure"
-        local hparallel=""
-        if [ -n "$mpilib" ]; then hparallel="--enable-parallel"; fi
         tarball="$(fetch "$HDF5_URL" "$HDF5_URL_ALT")"
-        rm -rf /tmp/build/hdf5 && mkdir -p /tmp/build/hdf5
-        tar -C /tmp/build/hdf5 -xzf "$tarball" --strip-components=1
-        ( cd /tmp/build/hdf5 && CC="$cc" FC="$fc" ./configure --prefix="$HROOT" \
-              --enable-shared --disable-static --disable-fortran $hparallel \
-              > /tmp/hdf5-$flavor-configure.log 2>&1 && \
-          make -j"$(nproc_avail)" > /tmp/hdf5-$flavor-build.log 2>&1 && \
-          make install > /tmp/hdf5-$flavor-install.log 2>&1 )
+        rm -rf /tmp/build/hdf5 && mkdir -p /tmp/build/hdf5 && tar -C /tmp/build/hdf5 -xzf "$tarball" --strip-components=1
+        sl "configure hdf5 [$flavor]" "/tmp/hdf5-$flavor-configure.log" /tmp/build/hdf5 \
+            env CC="$cc" FC="$fc" ./configure --prefix="$HROOT" \
+                --enable-shared --disable-static --disable-fortran $hparallel
+        sl "compile hdf5 [$flavor]" "/tmp/hdf5-$flavor-build.log" /tmp/build/hdf5 make -j"$(nproc_avail)"
+        sl "install hdf5 [$flavor]" "/tmp/hdf5-$flavor-install.log" /tmp/build/hdf5 make install
     fi
 
-    # --- netCDF-C (parallel I/O only when built against a parallel HDF5) ---
+    # ---- netCDF-C ----
     if build_done "$CROOT/bin/nc-config"; then
         log "netcdf-c [$flavor]: cached"
     else
-        log "netcdf-c [$flavor]: download + configure"
-        local cparallel=""
-        if [ -n "$mpilib" ]; then cparallel="--enable-parallel4"; fi
         tarball="$(fetch "$NETCDF_C_URL" "$NETCDF_C_URL_ALT")"
-        rm -rf /tmp/build/netcdf-c && mkdir -p /tmp/build/netcdf-c
-        tar -C /tmp/build/netcdf-c -xzf "$tarball" --strip-components=1
-        ( cd /tmp/build/netcdf-c && CC="$cc" ./configure --prefix="$CROOT" \
-              --enable-shared --disable-static --disable-byterange $cparallel \
-              CPPFLAGS="-I$HROOT/include" \
-              LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib" \
-              > /tmp/netcdf-c-$flavor-configure.log 2>&1 && \
-          make -j"$(nproc_avail)" > /tmp/netcdf-c-$flavor-build.log 2>&1 && \
-          make install > /tmp/netcdf-c-$flavor-install.log 2>&1 )
+        rm -rf /tmp/build/netcdf-c && mkdir -p /tmp/build/netcdf-c && tar -C /tmp/build/netcdf-c -xzf "$tarball" --strip-components=1
+        sl "configure netcdf-c [$flavor]" "/tmp/netcdf-c-$flavor-configure.log" /tmp/build/netcdf-c \
+            env CC="$cc" ./configure --prefix="$CROOT" \
+                --enable-shared --disable-static --disable-byterange $cparallel \
+                CPPFLAGS="-I$HROOT/include" \
+                LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib"
+        sl "compile netcdf-c [$flavor]" "/tmp/netcdf-c-$flavor-build.log" /tmp/build/netcdf-c make -j"$(nproc_avail)"
+        sl "install netcdf-c [$flavor]" "/tmp/netcdf-c-$flavor-install.log" /tmp/build/netcdf-c make install
     fi
 
-    # --- netCDF-Fortran ---
+    # ---- netCDF-Fortran ----
     if build_done "$FROOT/bin/nf-config"; then
         log "netcdf-fortran [$flavor]: cached"
     else
-        log "netcdf-fortran [$flavor]: download + configure"
         tarball="$(fetch "$NETCDF_FORTRAN_URL" "$NETCDF_FORTRAN_URL_ALT")"
-        rm -rf /tmp/build/netcdf-fortran && mkdir -p /tmp/build/netcdf-fortran
-        tar -C /tmp/build/netcdf-fortran -xzf "$tarball" --strip-components=1
-        ( cd /tmp/build/netcdf-fortran && PATH="$CROOT/bin:$PATH" CC="$cc" FC="$fc" ./configure --prefix="$FROOT" \
-              --enable-shared --disable-static \
-              CPPFLAGS="-I$HROOT/include -I$CROOT/include" \
-              LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib -L$CROOT/lib -Wl,-rpath,$CROOT/lib" \
-              > /tmp/netcdf-fortran-$flavor-configure.log 2>&1 && \
-          make -j"$(nproc_avail)" > /tmp/netcdf-fortran-$flavor-build.log 2>&1 && \
-          make install > /tmp/netcdf-fortran-$flavor-install.log 2>&1 )
+        rm -rf /tmp/build/netcdf-fortran && mkdir -p /tmp/build/netcdf-fortran && tar -C /tmp/build/netcdf-fortran -xzf "$tarball" --strip-components=1
+        sl "configure netcdf-fortran [$flavor]" "/tmp/netcdf-fortran-$flavor-configure.log" /tmp/build/netcdf-fortran \
+            env PATH="$CROOT/bin:$PATH" CC="$cc" FC="$fc" ./configure --prefix="$FROOT" \
+                --enable-shared --disable-static \
+                CPPFLAGS="-I$HROOT/include -I$CROOT/include" \
+                LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib -L$CROOT/lib -Wl,-rpath,$CROOT/lib"
+        sl "compile netcdf-fortran [$flavor]" "/tmp/netcdf-fortran-$flavor-build.log" /tmp/build/netcdf-fortran make -j"$(nproc_avail)"
+        sl "install netcdf-fortran [$flavor]" "/tmp/netcdf-fortran-$flavor-install.log" /tmp/build/netcdf-fortran make install
     fi
 
-    # --- smoke test ---
+    # ---- smoke test ----
     log "netcdf [$flavor]: smoke test"
     gcc "$AUTOMOD_ROOT/tests/assets/nc-rt-test.c" \
         -I"$CROOT/include" -L"$CROOT/lib" -Wl,-rpath,"$CROOT/lib" \

@@ -21,17 +21,17 @@ install_oneapi() {
         | gpg --dearmor --yes -o /usr/share/keyrings/intel-oneapi.gpg
     printf 'deb [ signed-by=/usr/share/keyrings/intel-oneapi.gpg ] https://apt.repos.intel.com/oneapi all main\n' \
         > /etc/apt/sources.list.d/intel-oneapi.list
-    apt-get update -o Dir::Etc::SourceParts=/etc/apt/sources.list.d -o APT::Get::List-Cleanup=0 \
-        > /tmp/oneapi-apt-update.log 2>&1 || apt-get update > /tmp/oneapi-apt-update.log 2>&1
+    sl "apt-get update (incl. intel repo)" /tmp/oneapi-apt-update.log - \
+        bash -c 'apt-get update -o Dir::Etc::SourceParts=/etc/apt/sources.list.d -o APT::Get::List-Cleanup=0 || apt-get update'
 
     log "oneapi: installing compiler + mpi packages (this is a large download)"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        intel-oneapi-common-vars \
-        intel-oneapi-compiler-dpcpp-cpp \
-        intel-oneapi-compiler-fortran \
-        intel-oneapi-mpi \
-        intel-oneapi-mpi-devel \
-        > /tmp/oneapi-apt-install.log 2>&1
+    sl "apt-get install oneapi packages" /tmp/oneapi-apt-install.log - \
+        env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            intel-oneapi-common-vars \
+            intel-oneapi-compiler-dpcpp-cpp \
+            intel-oneapi-compiler-fortran \
+            intel-oneapi-mpi \
+            intel-oneapi-mpi-devel
 }
 
 # Pick the newest installed version directory of a component.
