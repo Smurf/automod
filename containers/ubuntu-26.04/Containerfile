@@ -1,0 +1,27 @@
+ARG DIST="26.04"
+FROM ubuntu:${DIST}
+ARG DIST
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Base toolchain + libraries for compiling the automod module stack.
+# lmod provides the module engine the cluster will use; everything built
+# here is produced and validated inside this same container.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential gcc g++ gfortran \
+        make cmake pkg-config \
+        wget curl ca-certificates gnupg \
+        tar gzip xz-utils bzip2 unzip file m4 perl \
+        bison flex \
+        libz-dev libfabric-dev libfabric1 \
+        lmod \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# lmod init + point module lookups at the automod tree mounted at /opt/automod.
+RUN printf '[[ -f /usr/share/lmod/lmod/init/bash ]] && source /usr/share/lmod/lmod/init/bash\n' \
+        > /etc/profile.d/91-lmod.sh \
+    && printf '[ -d /opt/automod/modulefiles ] && module use /opt/automod/modulefiles\n' \
+        > /etc/profile.d/92-automod-modulepath.sh \
+    && chmod 0644 /etc/profile.d/91-lmod.sh /etc/profile.d/92-automod-modulepath.sh
+
+ARG DIST
+LABEL org.opencontainers.image.description="automod HPC module builder (Ubuntu ${DIST})"
