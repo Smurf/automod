@@ -47,6 +47,10 @@ LUA
 log "smoke test: compile and run MPI hello with 2 ranks"
 export PATH="$PREFIX/bin:$PATH"
 export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
+# container builds run as root; Open MPI refuses by default (documented override)
+export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+# local-only smoke launch: avoid the rsh agent inside containers
+OMPI_MCA_plm_rsh_agent=""
 "$PREFIX/bin/mpicc" "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/ompi-hello
 timeout 300 "$PREFIX/bin/mpirun" --oversubscribe -n 2 /tmp/ompi-hello | sort | tee /tmp/ompi-hello.out
 grep -q "rank 1" /tmp/ompi-hello.out

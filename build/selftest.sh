@@ -35,6 +35,8 @@ for pair in "mpich $MPICH_VERSION" "openmpi $OPENMPI_VERSION"; do
     if module load "$name/$ver"; then
         check "$name mpicc hello" "$AUTOMOD_PREFIX/software/$name/$ver/bin/mpicc" \
             "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o "/tmp/hello-$name"
+        export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+        OMPI_MCA_plm_rsh_agent=""
         check "$name mpirun 2 ranks" mpirun -n 2 "/tmp/hello-$name"
         export LD_LIBRARY_PATH="$AUTOMOD_PREFIX/software/$name/$ver/lib:${LD_LIBRARY_PATH:-}"
         export PATH="$AUTOMOD_PREFIX/software/$name/$ver/bin:$PATH"

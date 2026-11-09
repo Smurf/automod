@@ -53,9 +53,10 @@ fetch() {
     exit 1
 }
 
-# build_done <prefix> -> 0 if that prefix looks complete, used for idempotence
+# build_done <path> -> 0 if <path> (a marker file such as bin/mpicc) exists.
+# Callers pass the artifact that indicates a completed install.
 build_done() {
-    [ -d "$1" ] && [ -n "$(find "$1" -maxdepth 1 -type f 2>/dev/null | head -1)" ]
+    [ -e "$1" ]
 }
 
 # write_module <target file> ... sed-style: read template markers %%FOO%% from stdin
