@@ -1,0 +1,7 @@
+# build outputs (never commit)
+downloads/
+modtree*/
+*.tar.gz
+# local scratch
+*.out
+*.log
