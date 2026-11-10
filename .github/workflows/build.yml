@@ -34,6 +34,7 @@ jobs:
           - { os: "26.04", suffix: "26.04" }
     env:
       TAG: automod:ubuntu-${{ matrix.os }}
+      TREE: modtree-${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,25 +53,27 @@ jobs:
                      source /usr/share/lmod/lmod/init/bash && module --version'
 
       - name: mpich module
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/mpich.sh
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/mpich.sh
 
       - name: openmpi module
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/openmpi.sh
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/openmpi.sh
 
       - name: netcdf module (serial + mpich + openmpi)
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/netcdf.sh
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/netcdf.sh
 
       - name: sparta module (serial + mpich + openmpi)
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/sparta.sh
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/sparta.sh
 
       - name: intel oneapi + intel mpi modules
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/oneapi.sh
+        # /opt/intel must persist across containers (installed by apt in this
+        # step; the selftest in the next step mounts it again to use icx/ifx).
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/oneapi.sh
 
       - name: selftest (lmod loads every module)
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/modtree:/opt/automod" "$TAG" bash /src/build/selftest.sh
+        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/selftest.sh
 
       - name: package module tree
-        run: tar -czf "automod-modtree-ubuntu-${{ matrix.os }}.tar.gz" -C modtree .
+        run: tar -czf "automod-modtree-ubuntu-${{ matrix.os }}.tar.gz" -C "$TREE" .
 
       - name: upload artifact
         uses: actions/upload-artifact@v4

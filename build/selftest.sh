@@ -27,6 +27,11 @@ module avail 2>&1 | tee /tmp/module-avail.out
 
 # serial gcc netcdf
 if module load netcdf/4.9.3; then
+    check "netcdf serial compile" gcc "$AUTOMOD_ROOT/tests/assets/nc-rt-test.c" \
+        -I"$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/gnu/include" \
+        -L"$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/gnu/lib" \
+        -L"$AUTOMOD_PREFIX/software/hdf5/$HDF5_VERSION/gnu/lib" \
+        -lnetcdf -o /tmp/nc-rt-gnu
     check "netcdf serial binary" /tmp/nc-rt-gnu
     module purge
 else
@@ -34,6 +39,9 @@ else
 fi
 
 # Each MPI: load it, hierarchically-visible netcdf + sparta must load & run
+# Under the mpi/ root the Lmod names of the hidden hierarchy are prefixed
+# with the MPI package (e.g. openmpi/4.1.8/netcdf/4.9.3); a bare
+# "netcdf/4.9.3" would match the serial libs/ flavor instead.
 for pair in "mpich $MPICH_VERSION" "openmpi $OPENMPI_VERSION"; do
     read -r name ver <<< "$pair"
     if module load "$name/$ver"; then
@@ -44,23 +52,24 @@ for pair in "mpich $MPICH_VERSION" "openmpi $OPENMPI_VERSION"; do
         export OMPI_MCA_plm_rsh_agent=""
         check "$name mpirun 2 ranks" mpirun -n 2 "/tmp/hello-$name"
 
-        if module load netcdf/4.9.3; then
+        if module load "$name/$ver/netcdf/$NETCDF_C_VERSION"; then
             # compile the runtime test against the MPI-flavored netcdf, run 2 ranks
             check "netcdf $name compile test" gcc "$AUTOMOD_ROOT/tests/assets/nc-rt-test.c" \
                 -I"$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/$name/include" \
                 -L"$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/$name/lib" \
+                -L"$AUTOMOD_PREFIX/software/hdf5/$HDF5_VERSION/$name/lib" \
                 -lnetcdf -o "/tmp/nc-rt-$name"
             check "netcdf $name run" "/tmp/nc-rt-$name"
-            module unload netcdf/4.9.3
+            module unload "$name/$ver/netcdf/$NETCDF_C_VERSION"
         else
-            echo "FAIL: load netcdf/4.9.3 under $name"; fail=1
+            echo "FAIL: load $name/$ver/netcdf/$NETCDF_C_VERSION"; fail=1
         fi
 
-        if module load sparta/$SPARTA_TAG; then
+        if module load "$name/$ver/sparta/$SPARTA_TAG"; then
             check "sparta $name banner" timeout 300 sparta < /dev/null
-            module unload sparta/$SPARTA_TAG
+            module unload "$name/$ver/sparta/$SPARTA_TAG"
         else
-            echo "FAIL: load sparta/$SPARTA_TAG under $name"; fail=1
+            echo "FAIL: load $name/$ver/sparta/$SPARTA_TAG under $name"; fail=1
         fi
         module purge
     else
