@@ -38,6 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: make tree + intel dirs (podman mounts need them to exist)
+        run: mkdir -p "$TREE" .intel
+
       - name: build container image (podman)
         run: |
           podman build --quiet -t "$TAG" \
@@ -53,24 +56,32 @@ jobs:
                      source /usr/share/lmod/lmod/init/bash && module --version'
 
       - name: mpich module
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/mpich.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/mpich.sh
 
       - name: openmpi module
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/openmpi.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/openmpi.sh
 
       - name: netcdf module (serial + mpich + openmpi)
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/netcdf.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/netcdf.sh
 
       - name: sparta module (serial + mpich + openmpi)
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/sparta.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" "$TAG" bash /src/build/sparta.sh
 
       - name: intel oneapi + intel mpi modules
         # /opt/intel must persist across containers (installed by apt in this
         # step; the selftest in the next step mounts it again to use icx/ifx).
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/oneapi.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/oneapi.sh
 
       - name: selftest (lmod loads every module)
-        run: podman run --rm --workdir /src -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/selftest.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/selftest.sh
+
+      - name: upload build logs (diagnostics)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-ubuntu-${{ matrix.os }}
+          path: .tmplogs/
+          if-no-files-found: ignore
 
       - name: package module tree
         run: tar -czf "automod-modtree-ubuntu-${{ matrix.os }}.tar.gz" -C "$TREE" .
