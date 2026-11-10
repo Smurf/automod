@@ -33,7 +33,8 @@ sl "install mpich" "$LOGDIR/mpich-install.log" /tmp/build/mpich make install
 
 log "writing modulefile"
 write_module "$AUTOMOD_MODULEFILES/mpi/mpich/$MPICH_VERSION.lua" \
-    PKG="mpich" VER="$MPICH_VERSION" PREFIX="$PREFIX" <<'LUA'
+    PKG="mpich" VER="$MPICH_VERSION" PREFIX="$PREFIX" \
+    MFPATH="$AUTOMOD_MODULEFILES/mpi/mpich/$MPICH_VERSION" <<'LUA'
 help([[MPICH %%VER%% (ch4/ofi device, gcc backend) built by the automod stack.]])
 whatis("Name: MPICH %%VER%%")
 whatis("Description: Message Passing Interface implementation, ch4 over libfabric")
@@ -49,6 +50,7 @@ prepend_path("CPATH",           pathJoin(root, "include"))
 prepend_path("LIBRARY_PATH",    pathJoin(root, "lib"))
 prepend_path("MANPATH",         pathJoin(root, "share", "man"))
 prepend_path("PKG_CONFIG_PATH", pathJoin(root, "lib", "pkgconfig"))
+prepend_path("MODULEPATH",      "%%MFPATH%%")
 setenv("MPICH_ROOT", root)
 LUA
 

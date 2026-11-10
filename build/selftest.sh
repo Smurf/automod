@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Final validation of a built automod tree: load every module with Lmod and
+# Final validation of the built automod tree: load every module with Lmod and
 # exercise the binaries. Run inside the container after all build scripts.
+# MODULEPATH scope roots (see Containerfile profile.d): mpi/, libs/, apps/, compilers/
 set -uo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -18,30 +19,49 @@ check() {
     fi
 }
 
-log "lmod: module avail"
+export MODULEPATH="/opt/automod/modulefiles/mpi:/opt/automod/modulefiles/libs:/opt/automod/modulefiles/apps:/opt/automod/modulefiles/compilers:/etc/modulefiles:/usr/share/lmod/lmod/modulefiles"
+log "lmod: module init + avail"
 source /usr/share/lmod/lmod/init/bash
-export MODULEPATH="/opt/automod/modulefiles:/etc/modulefiles:/usr/share/lmod/lmod/modulefiles"
 module --version || { echo "lmod missing"; exit 1; }
 module avail 2>&1 | tee /tmp/module-avail.out
 
 # serial gcc netcdf
-check "module load netcdf" module load netcdf
-check "netcdf serial binary" /tmp/nc-rt-gnu
-module purge
+if module load netcdf/4.9.3; then
+    check "netcdf serial binary" /tmp/nc-rt-gnu
+    module purge
+else
+    echo "FAIL: load netcdf/4.9.3 (serial)"; fail=1
+fi
 
-# Each MPI loads, then compiles+runs hello (mpicc/mpicxx).
+# Each MPI: load it, hierarchically-visible netcdf + sparta must load & run
 for pair in "mpich $MPICH_VERSION" "openmpi $OPENMPI_VERSION"; do
     read -r name ver <<< "$pair"
     if module load "$name/$ver"; then
+        check "netcdf $name visible after load" bash -c "module avail 2>&1 | grep -q 'netcdf/4.9.3'"
         check "$name mpicc hello" "$AUTOMOD_PREFIX/software/$name/$ver/bin/mpicc" \
             "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o "/tmp/hello-$name"
         export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
-        OMPI_MCA_plm_rsh_agent=""
+        export OMPI_MCA_plm_rsh_agent=""
         check "$name mpirun 2 ranks" mpirun -n 2 "/tmp/hello-$name"
-        export LD_LIBRARY_PATH="$AUTOMOD_PREFIX/software/$name/$ver/lib:${LD_LIBRARY_PATH:-}"
-        export PATH="$AUTOMOD_PREFIX/software/$name/$ver/bin:$PATH"
-        check "sparta $name banner" timeout 300 sparta < /dev/null
-        check "netcdf $name serial-api file" /tmp/nc-rt-$name
+
+        if module load netcdf/4.9.3; then
+            # compile the runtime test against the MPI-flavored netcdf, run 2 ranks
+            check "netcdf $name compile test" gcc "$AUTOMOD_ROOT/tests/assets/nc-rt-test.c" \
+                -I"$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/$name/include" \
+                -L"$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/$name/lib" \
+                -lnetcdf -o "/tmp/nc-rt-$name"
+            check "netcdf $name run" "/tmp/nc-rt-$name"
+            module unload netcdf/4.9.3
+        else
+            echo "FAIL: load netcdf/4.9.3 under $name"; fail=1
+        fi
+
+        if module load sparta/$SPARTA_TAG; then
+            check "sparta $name banner" timeout 300 sparta < /dev/null
+            module unload sparta/$SPARTA_TAG
+        else
+            echo "FAIL: load sparta/$SPARTA_TAG under $name"; fail=1
+        fi
         module purge
     else
         echo "FAIL: load $name/$ver"
@@ -51,23 +71,27 @@ done
 
 # oneapi + intelmpi
 if [ -d /opt/intel/oneapi/compiler ] && [ -d /opt/intel/oneapi/mpi ]; then
-    CVER="$(ls -1d /opt/intel/oneapi/compiler/* | xargs -n1 basename | sort -V | tail -1)"
-    MVER="$(ls -1d /opt/intel/oneapi/mpi/* | xargs -n1 basename | sort -V | tail -1)"
-    if module load compilers/oneapi/$CVER; then
-        check "icx hello" /opt/intel/oneapi/compiler/$CVER/bin/icx \
-            "$AUTOMOD_ROOT/tests/assets/hello.c" -o /tmp/hello-icx-selftest
+    CVER="$(ls -1d /opt/intel/oneapi/compiler/* | xargs -n1 basename 2>/dev/null | grep -v ^latest$ | sort -V | tail -1)"
+    MVER="$(ls -1d /opt/intel/oneapi/mpi/* | xargs -n1 basename 2>/dev/null | grep -v ^latest$ | sort -V | tail -1)"
+    export FI_PROVIDER=shm
+    check "icx hello" /opt/intel/oneapi/compiler/$CVER/bin/icx \
+        "$AUTOMOD_ROOT/tests/assets/hello.c" -o /tmp/hello-icx-selftest
+    if module load intelmpi/$MVER; then
+        check "intelmpi gcc wrapper" /opt/intel/oneapi/mpi/$MVER/bin/mpigcc \
+            "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/hello-intelmpi-gcc
+        export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+        check "intelmpi mpirun 2 ranks" mpirun -n 2 /tmp/hello-intelmpi-gcc
+        if module load oneapi/$CVER; then
+            check "intelmpi icx wrapper" env I_MPI_CC=icx I_MPI_CXX=icpx I_MPI_FC=ifx \
+                /opt/intel/oneapi/mpi/$MVER/bin/mpiicc \
+                "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/hello-intelmpi-icx
+            module unload oneapi/$CVER
+        else
+            echo "FAIL: load oneapi/$CVER"; fail=1
+        fi
         module purge
     else
-        echo "FAIL: load compilers/oneapi/$CVER"; fail=1
-    fi
-    if module load mpi/intelmpi/$MVER; then
-        check "intelmpi compile" /opt/intel/oneapi/mpi/$MVER/bin/mpiicc \
-            "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/hello-intelmpi
-        export FI_PROVIDER=shm
-        check "intelmpi mpirun 2 ranks" mpirun -n 2 /tmp/hello-intelmpi
-        module purge
-    else
-        echo "FAIL: load mpi/intelmpi/$MVER"; fail=1
+        echo "FAIL: load intelmpi/$MVER"; fail=1
     fi
 fi
 

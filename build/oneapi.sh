@@ -34,9 +34,10 @@ install_oneapi() {
             intel-oneapi-mpi-devel
 }
 
-# Pick the newest installed version directory of a component.
+# Pick the newest installed version directory of a component (skip the 'latest' symlink alias).
 pick_ver() {
-    ls -1d "$ONEAPI_BASE/$1"/* 2>/dev/null | xargs -n1 basename 2>/dev/null | sort -V | tail -1
+    ls -1d "$ONEAPI_BASE/$1"/* 2>/dev/null | xargs -n1 basename 2>/dev/null \
+        | grep -v '^latest$' | sort -V | tail -1
 }
 
 install_oneapi
@@ -68,7 +69,6 @@ prepend_path("CPATH",           pathJoin(root, "include"))
 prepend_path("CPATH",           pathJoin(root, "opt", "compiler", "include"))
 prepend_path("LIBRARY_PATH",    pathJoin(root, "lib"))
 prepend_path("LIBRARY_PATH",    pathJoin(root, "opt", "compiler", "lib"))
-prepend_path("MODULEPATH",      pathJoin(root, "lib", "modulefiles"))
 prepend_path("MANPATH",         pathJoin(root, "share", "man"))
 prepend_path("PKG_CONFIG_PATH", pathJoin(root, "lib", "pkgconfig"))
 setenv("CMPLR_ROOT", root)
@@ -112,6 +112,12 @@ info "icx/ifx compile + run ok"
 
 log "oneapi: smoke test intelmpi"
 export FI_PROVIDER=shm
+# Intel MPI 2026 wrappers default to the removed legacy 'icc' backend; point
+# them explicitly at the oneAPI compilers (mpigcc still works for gcc users).
+export I_MPI_CC=icx I_MPI_CXX=icpx I_MPI_FC=ifx
+export I_MPI_ROOT="$MPIR" CMPLR_ROOT="$CMPL"
+export FI_PROVIDER_PATH="$MPIR/libfabric/lib/prov"
+export CPATH="$MPIR/include${CPATH:+:$CPATH}"
 "$MPIR/bin/mpiicc" "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/impi-hello
 timeout 300 "$MPIR/bin/mpirun" -n 2 /tmp/impi-hello | sort | tee /tmp/impi-hello.out
 grep -q "rank 1" /tmp/impi-hello.out

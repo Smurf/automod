@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # lmod init + point module lookups at the automod tree mounted at /opt/automod.
 RUN printf '[[ -f /usr/share/lmod/lmod/init/bash ]] && source /usr/share/lmod/lmod/init/bash\n' \
         > /etc/profile.d/91-lmod.sh \
-    && printf '[ -d /opt/automod/modulefiles ] && module use /opt/automod/modulefiles\n' \
+    && printf "for _d in mpi libs apps compilers; do [ -d /opt/automod/modulefiles/$_d ] && module use /opt/automod/modulefiles/$_d; done; unset _d\n" \
         > /etc/profile.d/92-automod-modulepath.sh \
     && chmod 0644 /etc/profile.d/91-lmod.sh /etc/profile.d/92-automod-modulepath.sh
 

@@ -26,7 +26,8 @@ sl "install openmpi" "$LOGDIR/openmpi-install.log" /tmp/build/openmpi make insta
 
 log "writing modulefile"
 write_module "$AUTOMOD_MODULEFILES/mpi/openmpi/$OPENMPI_VERSION.lua" \
-    PKG="openmpi" VER="$OPENMPI_VERSION" PREFIX="$PREFIX" <<'LUA'
+    PKG="openmpi" VER="$OPENMPI_VERSION" PREFIX="$PREFIX" \
+    MFPATH="$AUTOMOD_MODULEFILES/mpi/openmpi/$OPENMPI_VERSION" <<'LUA'
 help([[Open MPI %%VER%% (gcc backend, internal PMIx/PRRTE/hwloc/libevent) built by the automod stack.]])
 whatis("Name: Open MPI %%VER%%")
 whatis("Description: Message Passing Interface implementation")
@@ -41,6 +42,7 @@ prepend_path("CPATH",           pathJoin(root, "include"))
 prepend_path("LIBRARY_PATH",    pathJoin(root, "lib"))
 prepend_path("MANPATH",         pathJoin(root, "share", "man"))
 prepend_path("PKG_CONFIG_PATH", pathJoin(root, "lib", "pkgconfig"))
+prepend_path("MODULEPATH",      "%%MFPATH%%")
 setenv("OMPI_ROOT", root)
 LUA
 
@@ -50,7 +52,7 @@ export LD_LIBRARY_PATH="$PREFIX/lib:${LD_LIBRARY_PATH:-}"
 # container builds run as root; Open MPI refuses by default (documented override)
 export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 # local-only smoke launch: avoid the rsh agent inside containers
-OMPI_MCA_plm_rsh_agent=""
+export OMPI_MCA_plm_rsh_agent=""
 "$PREFIX/bin/mpicc" "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/ompi-hello
 timeout 300 "$PREFIX/bin/mpirun" --oversubscribe -n 2 /tmp/ompi-hello | sort | tee /tmp/ompi-hello.out
 grep -q "rank 1" /tmp/ompi-hello.out
