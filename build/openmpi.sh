@@ -17,11 +17,16 @@ for MPVER in $OPENMPI_VERSIONS; do
         # Open MPI < 4.1.7 relies on libfabric's rdma/fabric.h providing the
         # container_of macro; newer libfabric (Ubuntu 26.04) dropped it, and
         # the mtl/ofi MTL then fails with "implicit declaration of function
-        # 'container_of'". 4.1.7+ include opal/util/misc.h, which carries the
-        # same fallback definition — apply that include to older trees.
+        # 'container_of'". 4.1.7 fixed this by including opal/util/misc.h,
+        # which carries the fallback definition below — inline that
+        # definition into older trees (no-op where container_of exists).
         if [ -f ompi/mca/mtl/ofi/mtl_ofi.h ] \
             && ! grep -q 'opal/util/misc.h' ompi/mca/mtl/ofi/mtl_ofi.h; then
-            sed -i '/#include "opal\/util\/show_help.h"/a #include "opal\/util\/misc.h"' \
+            sed -i '/#include "opal\/util\/show_help.h"/a\
+#include <stddef.h>\
+#ifndef container_of\
+#    define container_of(ptr, type, member) ((type *) (((char *) (ptr)) - offsetof(type, member)))\
+#endif' \
                 ompi/mca/mtl/ofi/mtl_ofi.h
         fi
 
