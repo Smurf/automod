@@ -83,6 +83,20 @@ mkdir -p "$LOGDIR" 2>/dev/null || true
 
 nproc_avail() { nproc; }
 
+# Portable Lmod bash init path: Ubuntu ships /usr/share/lmod/lmod/init/bash,
+# EPEL (Rocky/EL) a versioned /usr/share/lmod/<ver>/init/bash.
+lmod_init() {
+    local p
+    for p in /usr/share/lmod/lmod/init/bash /usr/share/lmod/*/init/bash; do
+        if [ -f "$p" ]; then
+            printf '%s\n' "$p"
+            return 0
+        fi
+    done
+    echo "ERROR: lmod init script not found under /usr/share/lmod" >&2
+    return 1
+}
+
 # sl: run <label> <logfile> <dir|-> <cmd...>; on failure dump the log tail and exit.
 sl() {
     local label="$1" lf="$2" dir="$3"; shift 3

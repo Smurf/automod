@@ -22,9 +22,9 @@ check() {
     fi
 }
 
-export MODULEPATH="/opt/automod/modulefiles/mpi:/opt/automod/modulefiles/libs:/opt/automod/modulefiles/apps:/opt/automod/modulefiles/compilers:/etc/modulefiles:/usr/share/lmod/lmod/modulefiles"
+export MODULEPATH="/opt/automod/modulefiles/mpi:/opt/automod/modulefiles/libs:/opt/automod/modulefiles/apps:/opt/automod/modulefiles/compilers:/etc/modulefiles:/usr/share/modulefiles:/usr/share/lmod/lmod/modulefiles"
 log "lmod: module init + avail"
-source /usr/share/lmod/lmod/init/bash
+source "$(lmod_init)"
 module --version || { echo "lmod missing"; exit 1; }
 module avail 2>&1 | tee /tmp/module-avail.out
 
