@@ -17,8 +17,8 @@ if [ ! "$(podman image ls -q "$tag")" ]; then
 fi
 mkdir -p "$tree" "$intel"
 
-run() { LOGDIR="$PWD/.tmplogs" podman run --rm --workdir /src \
-    -e "LOGDIR=$PWD/.tmplogs" \
+run() { podman run --rm --workdir /src \
+    -e "LOGDIR=/src/.tmplogs" \
     -v "$PWD:/src" -v "$PWD/$tree:/opt/automod" -v "$PWD/$intel:/opt/intel" \
     "$tag" bash "/src/build/$1"; }
 
