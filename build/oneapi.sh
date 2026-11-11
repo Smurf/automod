@@ -161,10 +161,15 @@ LUA
 done
 
 # ---- smoke tests: one per installed version -------------
+# Each version is tested against a clean base environment so no earlier
+# version's lib dirs leak into its run.
+BASEPATH="$PATH"
+BASELDP="${LD_LIBRARY_PATH:-}"
+BASECPATH="${CPATH:-}"
 for CVER in $ONEAPI_COMPILER_VERSIONS; do
     CMPL="$ONEAPI_BASE/compiler/$CVER"
-    export PATH="$CMPL/bin:$PATH"
-    export LD_LIBRARY_PATH="$CMPL/lib:${LD_LIBRARY_PATH:-}"
+    export PATH="$CMPL/bin:$BASEPATH"
+    export LD_LIBRARY_PATH="$CMPL/lib:$BASELDP"
     log "oneapi: smoke test icx/ifx ($CVER)"
     "$CMPL/bin/icx" "$AUTOMOD_ROOT/tests/assets/hello.c" -o "/tmp/hello-icx-$CVER"
     "/tmp/hello-icx-$CVER" | grep -q "hello from icx"
@@ -176,10 +181,11 @@ done
 for MVER in $INTEL_MPI_VERSIONS; do
     MPIR="$ONEAPI_BASE/mpi/$MVER"
     log "oneapi: smoke test intelmpi ($MVER)"
-    export PATH="$MPIR/bin:$PATH"
-    export LD_LIBRARY_PATH="$MPIR/lib:$MPIR/libfabric/lib:${LD_LIBRARY_PATH:-}"
+    export PATH="$MPIR/bin:$BASEPATH"
+    export LD_LIBRARY_PATH="$MPIR/lib:$MPIR/libfabric/lib:$BASELDP"
     export FI_PROVIDER=shm FI_PROVIDER_PATH="$MPIR/libfabric/lib/prov"
-    export CPATH="$MPIR/include${CPATH:+:$CPATH}"
+    export I_MPI_ROOT="$MPIR"
+    export CPATH="$MPIR/include${BASECPATH:+:$BASECPATH}"
     # gcc-backed wrappers need no oneAPI compiler loaded
     "$MPIR/bin/mpigcc" "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o "/tmp/impi-hello-$MVER"
     timeout 300 "$MPIR/bin/mpirun" -n 2 "/tmp/impi-hello-$MVER" | sort | tee "/tmp/impi-hello-$MVER.out"
@@ -190,15 +196,15 @@ done
 # newest compiler + newest MPI together: icx-backed wrappers
 CMPL="$ONEAPI_BASE/compiler/$(list_versions compiler | head -1)"
 MPIR="$ONEAPI_BASE/mpi/$(list_versions mpi | head -1)"
-export PATH="$CMPL/bin:$MPIR/bin:$PATH"
-export LD_LIBRARY_PATH="$CMPL/lib:$MPIR/lib:$MPIR/libfabric/lib:${LD_LIBRARY_PATH:-}"
+export PATH="$CMPL/bin:$MPIR/bin:$BASEPATH"
+export LD_LIBRARY_PATH="$CMPL/lib:$MPIR/lib:$MPIR/libfabric/lib:$BASELDP"
 export FI_PROVIDER=shm
 # Intel MPI 2026-series wrappers default to the removed legacy 'icc' backend;
 # point them explicitly at the oneAPI compilers (mpigcc still works for gcc users).
 export I_MPI_CC=icx I_MPI_CXX=icpx I_MPI_FC=ifx
 export I_MPI_ROOT="$MPIR" CMPLR_ROOT="$CMPL"
 export FI_PROVIDER_PATH="$MPIR/libfabric/lib/prov"
-export CPATH="$MPIR/include${CPATH:+:$CPATH}"
+export CPATH="$MPIR/include${BASECPATH:+:$BASECPATH}"
 "$MPIR/bin/mpiicc" "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/impi-hello-icx
 timeout 300 "$MPIR/bin/mpirun" -n 2 /tmp/impi-hello-icx | sort | tee /tmp/impi-hello-icx.out
 grep -q "rank 1" /tmp/impi-hello-icx.out
