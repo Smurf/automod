@@ -14,20 +14,26 @@ hierarchy modules with the MPI name prefixed (`mpich/4.3.2/netcdf/4.9.3`).
 
 | `module load` name                            | Software                              |
 |-----------------------------------------------|---------------------------------------|
-| `mpich/4.3.2`                                 | MPICH (ch4/ofi device, gcc backend)   |
-| `openmpi/4.1.8`                               | Open MPI 4.1.8                        |
-| `intelmpi/2021.19`                            | Intel MPI Library                     |
-| `oneapi/2026.2`                               | Intel oneAPI compilers (icx/ifx)      |
-| `netcdf/4.9.3` (load `mpich/4.3.2` first)     | netCDF-C + Fortran, MPICH parallel    |
-| `netcdf/4.9.3` (load `openmpi/4.1.8` first)   | netCDF-C + Fortran, Open MPI parallel |
-| `netcdf/4.9.3` (serial)                       | netCDF-C + Fortran, serial (gcc)      |
-| `sparta/27Aug2026` (load `mpich/4.3.2` first) | SPARTA DSMC, MPICH build              |
-| `sparta/27Aug2026` (load `openmpi/4.1.8` first)| SPARTA DSMC, Open MPI build          |
-| `sparta/27Aug2026-gnu` (serial)               | SPARTA DSMC, serial build             |
+| `mpich/4.3.2`, `mpich/4.2.3`                   | MPICH (ch4/ofi device, gcc backend)   |
+| `openmpi/4.1.8`, `openmpi/4.1.6`               | Open MPI 4.1.x                        |
+| `intelmpi/2021.19`, `intelmpi/2021.18`         | Intel MPI Library                     |
+| `oneapi/2026.2`, `oneapi/2025.3`               | Intel oneAPI compilers (icx/ifx)      |
+| `mkl/2026.2`, `mkl/2025.3`                     | Intel Math Kernel Library (libmkl_rt) |
+| `netcdf/4.9.3`, `netcdf/4.9.2` (serial)        | netCDF-C + Fortran, serial (gcc)      |
+| `netcdf/<ver>` under `mpich/<v>`               | netCDF-C + Fortran, MPICH parallel    |
+| `netcdf/<ver>` under `openmpi/<v>`             | netCDF-C + Fortran, Open MPI parallel |
+| `sparta/27Aug2026` (serial or under an MPI)    | SPARTA DSMC                           |
+
+Multiple versions of each package are built side by side (the matrix is
+pinned in `build/versions.env`); load any of them by version. netCDF and
+SPARTA are built against *every* MPI version, so the hierarchy is complete
+(`mpi/mpich/4.2.3/netcdf/4.9.2` etc.).
 
 The MPI and netCDF/SPARTA modules follow the usual Lmod hierarchy: load an MPI
-first (`module load mpich/4.3.2`), then load the MPI-specific `netcdf` /
-`sparta` modules that become visible in `module avail`.
+first (`module load mpich/4.2.3`), then load the MPI-specific `netcdf` /
+`sparta` modules that become visible in `module avail`. MKL links through the
+single dynamic interface (`-lmkl_rt`); with a GNU toolchain set
+`MKL_THREADING_LAYER=GNU` (the `mkl` module sets `MKL_INTERFACE_LAYER=LP64`).
 
 ## Layout
 
@@ -50,15 +56,18 @@ Each CI job (and each local run) produces `/opt/automod`:
 ├── modulefiles/...          the lmod tree listed above
 └── software/
     ├── hdf5/1.14.6/<flavor>       hdf5 linked against that flavor
-    ├── netcdf/4.9.3/<flavor>      netcdf-c
-    ├── netcdf-fortran/4.6.2/<flavor>
-    ├── mpich/4.3.2/               full install tree
-    ├── openmpi/4.1.8/
+    ├── netcdf/<ncver>/<flavor>    netcdf-c (one per netCDF version)
+    ├── netcdf-fortran/<nfver>/<flavor>
+    ├── mpich/<mpiver>/            full install tree, one per version
+    ├── openmpi/<mpiver>/
     ├── sparta/27Aug2026/<flavor>
-    └── intel oneapi lives in /opt/intel/oneapi (binary install)
+    └── intel oneapi lives in /opt/intel/oneapi (binary install:
+        compiler/<v>, mpi/<v> and mkl/<v> per version)
 ```
 
-`<flavor>` is `gnu` (serial) or `mpich` / `openmpi`.
+`<flavor>` is `gnu` (serial) or `<mpi>-<mpiver>` (e.g. `mpich-4.3.2`,
+`openmpi-4.1.6`) — the MPI version is part of the flavor because the
+parallel builds are linked against that exact MPI.
 
 ## Local testing with podman
 
@@ -77,7 +86,13 @@ Each run writes into `./modtree-<os>/` (the module tree) and `./.intel-<os>/`
 ## Using the result on the cluster
 
 1. Download the `automod-modtree-ubuntu-<rel>` artifact from a successful
-   GitHub Actions run.
+   GitHub Actions run — or, easier, grab both tarballs (plus `SHA256SUMS`)
+   from a published **GitHub release**: push a `v*` tag and the workflow
+   builds both Ubuntu releases and attaches them, e.g.
+
+   ```bash
+   git tag v2026.11 && git push origin v2026.11
+   ```
 2. Extract it at the filesystem root on the cluster: `tar -xf automod-modtree-ubuntu-24.04.tar.gz -C /`
    (trees are built to live under `/opt/automod`).
 3. Make lmod aware of it — each scope directory is its own MODULEPATH root:
@@ -100,9 +115,13 @@ Each run writes into `./modtree-<os>/` (the module tree) and `./.intel-<os>/`
 
 ## Supported versions
 
-See `build/versions.env` for the exact pinned tarballs (mpich 4.3.2, Open MPI
-4.1.8, HDF5 1.14.6, netCDF-C 4.9.3, netCDF-Fortran 4.6.2, SPARTA tag
-27Aug2026). Intel oneAPI tracks the current release of Intel's apt repo.
+See `build/versions.env` for the full version matrix: mpich 4.3.2/4.2.3,
+Open MPI 4.1.8/4.1.6, HDF5 1.14.6, netCDF-C 4.9.3/4.9.2 with netCDF-Fortran
+4.6.2/4.6.1 (paired by index), and Intel oneAPI compiler 2026.2/2025.3,
+Intel MPI 2021.19/2021.18, MKL 2026.2/2025.3 installed side by side from
+versioned apt packages. SPARTA tag 27Aug2026 is built against each MPI
+version. To add a version, extend the list in `versions.env` — the build
+scripts, modulefiles and selftest pick it up automatically.
 
 ## Supported Ubuntu releases
 

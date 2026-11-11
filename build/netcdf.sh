@@ -1,42 +1,49 @@
 #!/usr/bin/env bash
-# Build the netCDF stack (HDF5, netCDF-C, netCDF-Fortran) three times:
-# serial gnu flavor, plus one per MPI for the Lmod hierarchy:
-#   libs/netcdf/<ver>.lua                    (serial)
-#   mpi/mpich/<mpi>/netcdf/<ver>.lua
-#   mpi/openmpi/<mpi>/netcdf/<ver>.lua
+# Build the netCDF stack (HDF5, netCDF-C, netCDF-Fortran) for every netCDF
+# version pair in $NETCDF_C_VERSIONS/$NETCDF_FORTRAN_VERSIONS (paired by
+# index) and every flavor: serial gnu, plus one build per MPI version for
+# the Lmod hierarchy:
+#   libs/netcdf/<ncver>.lua                        (serial)
+#   mpi/mpich/<mpiver>/netcdf/<ncver>.lua
+#   mpi/openmpi/<mpiver>/netcdf/<ncver>.lua
+# Software flavor directories encode the MPI version: mpich-4.3.2 etc.
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
-setup_flavor_env() {
-    case "$1" in
-        gnu)     printf 'gcc\ngfortran\n\n' ;;
-        mpich)   printf '%s\n%s\n%s\n' \
-                     "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin/mpicc" \
-                     "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin/mpif90" \
-                     "$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib" ;;
-        openmpi) printf '%s\n%s\n%s\n' \
-                     "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin/mpicc" \
-                     "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin/mpif90" \
-                     "$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib" ;;
-        *) echo "unknown flavor '$1'" >&2; exit 1 ;;
-    esac
+read -ra NCVERS <<< "$NETCDF_C_VERSIONS"
+read -ra NFVERS <<< "$NETCDF_FORTRAN_VERSIONS"
+if [ "${#NCVERS[@]}" -ne "${#NFVERS[@]}" ]; then
+    echo "ERROR: NETCDF_C_VERSIONS (${NCVERS[*]}) must pair 1:1 with NETCDF_FORTRAN_VERSIONS (${NFVERS[*]})" >&2
+    exit 1
+fi
+
+# Emit "<flavor> <cc> <fc> <mpilib>" lines: gnu serial, then one per MPI version.
+mpi_flavors() {
+    printf 'gnu gcc gfortran\n'
+    local mv p
+    for mv in $MPICH_VERSIONS; do
+        p="$AUTOMOD_PREFIX/software/mpich/$mv"
+        printf 'mpich-%s %s %s %s\n' "$mv" "$p/bin/mpicc" "$p/bin/mpif90" "$p/lib"
+    done
+    for mv in $OPENMPI_VERSIONS; do
+        p="$AUTOMOD_PREFIX/software/openmpi/$mv"
+        printf 'openmpi-%s %s %s %s\n' "$mv" "$p/bin/mpicc" "$p/bin/mpif90" "$p/lib"
+    done
 }
 
 build_flavor() {
-    local flavor="$1"
-    local cc fc mpilib
-    { read -r cc; read -r fc; read -r mpilib; } < <(setup_flavor_env "$flavor")
+    local ncver="$1" nfver="$2" flavor="$3" cc="$4" fc="$5" mpilib="$6"
 
     local HROOT="$AUTOMOD_PREFIX/software/hdf5/$HDF5_VERSION/$flavor"
-    local CROOT="$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/$flavor"
-    local FROOT="$AUTOMOD_PREFIX/software/netcdf-fortran/$NETCDF_FORTRAN_VERSION/$flavor"
+    local CROOT="$AUTOMOD_PREFIX/software/netcdf/$ncver/$flavor"
+    local FROOT="$AUTOMOD_PREFIX/software/netcdf-fortran/$nfver/$flavor"
     local hparallel="" cparallel=""
     if [ -n "$mpilib" ]; then hparallel="--enable-parallel"; cparallel="--enable-parallel4"; fi
 
     # ---- HDF5 ----
     if build_done "$HROOT/lib/libhdf5.so"; then
-        log "hdf5 [$flavor]: cached"
+        log "hdf5 [$ncver/$flavor]: cached"
     else
         tarball="$(fetch "$HDF5_URL" "$HDF5_URL_ALT")"
         rm -rf /tmp/build/hdf5 && mkdir -p /tmp/build/hdf5 && tar -C /tmp/build/hdf5 -xzf "$tarball"
@@ -52,60 +59,61 @@ build_flavor() {
             mv "$inner_dir"/* ""/tmp/build/hdf5-hoist/"" || tar -C "$inner_dir" -cf - . | tar -C /tmp/build/hdf5-hoist -xf -
             rm -rf /tmp/build/hdf5 && mv /tmp/build/hdf5-hoist /tmp/build/hdf5
         fi
-        sl "configure hdf5 [$flavor]" "$LOGDIR/hdf5-$flavor-configure.log" /tmp/build/hdf5 \
+        sl "configure hdf5 [$ncver/$flavor]" "$LOGDIR/hdf5-$flavor-$ncver-configure.log" /tmp/build/hdf5 \
             env CC="$cc" FC="$fc" ./configure --prefix="$HROOT" \
                 --enable-shared --disable-static --disable-fortran $hparallel
-        sl "compile hdf5 [$flavor]" "$LOGDIR/hdf5-$flavor-build.log" /tmp/build/hdf5 make -j"$(nproc_avail)"
-        sl "install hdf5 [$flavor]" "$LOGDIR/hdf5-$flavor-install.log" /tmp/build/hdf5 make install
+        sl "compile hdf5 [$ncver/$flavor]" "$LOGDIR/hdf5-$flavor-$ncver-build.log" /tmp/build/hdf5 make -j"$(nproc_avail)"
+        sl "install hdf5 [$ncver/$flavor]" "$LOGDIR/hdf5-$flavor-$ncver-install.log" /tmp/build/hdf5 make install
     fi
 
     # ---- netCDF-C ----
     if build_done "$CROOT/bin/nc-config"; then
-        log "netcdf-c [$flavor]: cached"
+        log "netcdf-c [$ncver/$flavor]: cached"
     else
-        tarball="$(fetch "$NETCDF_C_URL" "$NETCDF_C_URL_ALT")"
+        tarball="$(fetch "$(netcdf_c_url "$ncver")" "$(netcdf_c_url_alt "$ncver")")"
         rm -rf /tmp/build/netcdf-c && mkdir -p /tmp/build/netcdf-c && tar -C /tmp/build/netcdf-c -xzf "$tarball" --strip-components=1
-        sl "configure netcdf-c [$flavor]" "$LOGDIR/netcdf-c-$flavor-configure.log" /tmp/build/netcdf-c \
+        sl "configure netcdf-c [$ncver/$flavor]" "$LOGDIR/netcdf-c-$flavor-$ncver-configure.log" /tmp/build/netcdf-c \
             env CC="$cc" ./configure --prefix="$CROOT" \
                 --enable-shared --disable-static --disable-byterange --disable-libxml2 $cparallel \
                 CPPFLAGS="-I$HROOT/include" \
                 LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib"
-        sl "compile netcdf-c [$flavor]" "$LOGDIR/netcdf-c-$flavor-build.log" /tmp/build/netcdf-c make -j"$(nproc_avail)"
-        sl "install netcdf-c [$flavor]" "$LOGDIR/netcdf-c-$flavor-install.log" /tmp/build/netcdf-c make install
+        sl "compile netcdf-c [$ncver/$flavor]" "$LOGDIR/netcdf-c-$flavor-$ncver-build.log" /tmp/build/netcdf-c make -j"$(nproc_avail)"
+        sl "install netcdf-c [$ncver/$flavor]" "$LOGDIR/netcdf-c-$flavor-$ncver-install.log" /tmp/build/netcdf-c make install
     fi
 
     # ---- netCDF-Fortran ----
     if build_done "$FROOT/bin/nf-config"; then
-        log "netcdf-fortran [$flavor]: cached"
+        log "netcdf-fortran [$nfver/$flavor]: cached"
     else
-        tarball="$(fetch "$NETCDF_FORTRAN_URL" "$NETCDF_FORTRAN_URL_ALT")"
+        tarball="$(fetch "$(netcdf_f_url "$nfver")" "$(netcdf_f_url_alt "$nfver")")"
         rm -rf /tmp/build/netcdf-fortran && mkdir -p /tmp/build/netcdf-fortran && tar -C /tmp/build/netcdf-fortran -xzf "$tarball" --strip-components=1
-        sl "configure netcdf-fortran [$flavor]" "$LOGDIR/netcdf-fortran-$flavor-configure.log" /tmp/build/netcdf-fortran \
+        sl "configure netcdf-fortran [$nfver/$flavor]" "$LOGDIR/netcdf-fortran-$flavor-$nfver-configure.log" /tmp/build/netcdf-fortran \
             env PATH="$CROOT/bin:$PATH" CC="$cc" FC="$fc" ./configure --prefix="$FROOT" \
                 --enable-shared --disable-static \
                 CPPFLAGS="-I$HROOT/include -I$CROOT/include" \
                 LDFLAGS="-L$HROOT/lib -Wl,-rpath,$HROOT/lib -L$CROOT/lib -Wl,-rpath,$CROOT/lib"
-        sl "compile netcdf-fortran [$flavor]" "$LOGDIR/netcdf-fortran-$flavor-build.log" /tmp/build/netcdf-fortran make -j"$(nproc_avail)"
-        sl "install netcdf-fortran [$flavor]" "$LOGDIR/netcdf-fortran-$flavor-install.log" /tmp/build/netcdf-fortran make install
+        sl "compile netcdf-fortran [$nfver/$flavor]" "$LOGDIR/netcdf-fortran-$flavor-$nfver-build.log" /tmp/build/netcdf-fortran make -j"$(nproc_avail)"
+        sl "install netcdf-fortran [$nfver/$flavor]" "$LOGDIR/netcdf-fortran-$flavor-$nfver-install.log" /tmp/build/netcdf-fortran make install
     fi
 
     # ---- smoke test ----
-    log "netcdf [$flavor]: smoke test"
+    log "netcdf [$ncver/$flavor]: smoke test"
     gcc "$AUTOMOD_ROOT/tests/assets/nc-rt-test.c" \
         -I"$CROOT/include" -L"$CROOT/lib" -Wl,-rpath,"$CROOT/lib" \
         -L"$HROOT/lib" -Wl,-rpath,"$HROOT/lib" -lnetcdf \
-        -o "/tmp/nc-rt-$flavor"
-    "/tmp/nc-rt-$flavor" > "/tmp/nc-rt-$flavor.out"
-    grep -q "netcdf smoke test ok" "/tmp/nc-rt-$flavor.out"
-    info "netcdf [$flavor]: $(head -1 "/tmp/nc-rt-$flavor.out")"
+        -o "/tmp/nc-rt-$ncver-$flavor"
+    "/tmp/nc-rt-$ncver-$flavor" > "/tmp/nc-rt-$ncver-$flavor.out"
+    grep -q "netcdf smoke test ok" "/tmp/nc-rt-$ncver-$flavor.out"
+    info "netcdf [$ncver/$flavor]: $(head -1 "/tmp/nc-rt-$ncver-$flavor.out")"
 }
 
 serial_module() {
-    local CROOT="$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/gnu"
-    local FROOT="$AUTOMOD_PREFIX/software/netcdf-fortran/$NETCDF_FORTRAN_VERSION/gnu"
+    local ncver="$1" nfver="$2"
+    local CROOT="$AUTOMOD_PREFIX/software/netcdf/$ncver/gnu"
+    local FROOT="$AUTOMOD_PREFIX/software/netcdf-fortran/$nfver/gnu"
     local HROOT="$AUTOMOD_PREFIX/software/hdf5/$HDF5_VERSION/gnu"
-    write_module "$AUTOMOD_MODULEFILES/libs/netcdf/$NETCDF_C_VERSION.lua" \
-        NCC="$NETCDF_C_VERSION" NCF="$NETCDF_FORTRAN_VERSION" \
+    write_module "$AUTOMOD_MODULEFILES/libs/netcdf/$ncver.lua" \
+        NCC="$ncver" NCF="$nfver" \
         CROOT="$CROOT" FROOT="$FROOT" HROOT="$HROOT" <<'LUA'
 help([[netCDF-C %%NCC%% + netCDF-Fortran %%NCF%% (serial gcc build) from the automod stack.]])
 whatis("Name: netCDF %%NCC%%/%%NCF%%")
@@ -131,14 +139,15 @@ LUA
 }
 
 mpi_module() {
-    # $1 = flavor dir name (mpich), $2 = module scope name (mpich), $3 = MPI version
-    local flavor="$1" mime="$2" miver="$3"
-    local CROOT="$AUTOMOD_PREFIX/software/netcdf/$NETCDF_C_VERSION/$flavor"
-    local FROOT="$AUTOMOD_PREFIX/software/netcdf-fortran/$NETCDF_FORTRAN_VERSION/$flavor"
+    # $1 = flavor dir name (mpich-4.3.2), $2 = module scope name (mpich),
+    # $3 = MPI version, $4 = netCDF-C version, $5 = netCDF-Fortran version
+    local flavor="$1" mime="$2" miver="$3" ncver="$4" nfver="$5"
+    local CROOT="$AUTOMOD_PREFIX/software/netcdf/$ncver/$flavor"
+    local FROOT="$AUTOMOD_PREFIX/software/netcdf-fortran/$nfver/$flavor"
     local HROOT="$AUTOMOD_PREFIX/software/hdf5/$HDF5_VERSION/$flavor"
-    local target="$AUTOMOD_MODULEFILES/mpi/$mime/$miver/netcdf/$NETCDF_C_VERSION.lua"
+    local target="$AUTOMOD_MODULEFILES/mpi/$mime/$miver/netcdf/$ncver.lua"
     write_module "$target" \
-        NCC="$NETCDF_C_VERSION" NCF="$NETCDF_FORTRAN_VERSION" \
+        NCC="$ncver" NCF="$nfver" \
         MIMOD="$mime" MIVER="$miver" \
         CROOT="$CROOT" FROOT="$FROOT" HROOT="$HROOT" <<'LUA'
 help([[netCDF-C %%NCC%% + netCDF-Fortran %%NCF%% (%%MIMOD%% %%MIVER%% parallel build) from the automod stack.]])
@@ -167,12 +176,22 @@ setenv("NETCDF_FORTRAN_ROOT", nf)
 LUA
 }
 
-build_flavor gnu
-build_flavor mpich
-build_flavor openmpi
+for i in "${!NCVERS[@]}"; do
+    ncver="${NCVERS[$i]}"; nfver="${NFVERS[$i]}"
+    while read -r flavor cc fc mpilib; do
+        build_flavor "$ncver" "$nfver" "$flavor" "$cc" "$fc" "$mpilib"
+    done < <(mpi_flavors)
+done
 
-serial_module
-mpi_module mpich mpich "$MPICH_VERSION"
-mpi_module openmpi openmpi "$OPENMPI_VERSION"
+for i in "${!NCVERS[@]}"; do
+    ncver="${NCVERS[$i]}"; nfver="${NFVERS[$i]}"
+    serial_module "$ncver" "$nfver"
+    for mv in $MPICH_VERSIONS; do
+        mpi_module "mpich-$mv" mpich "$mv" "$ncver" "$nfver"
+    done
+    for mv in $OPENMPI_VERSIONS; do
+        mpi_module "openmpi-$mv" openmpi "$mv" "$ncver" "$nfver"
+    done
+done
 
-stamp "netcdf stack OK (gcc + mpich + openmpi flavors)"
+stamp "netcdf stack OK (gnu + every mpich/openmpi version, ${NCVERS[*]})"

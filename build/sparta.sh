@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Build SPARTA (DSMC Monte Carlo code, github.com/sparta/sparta) as Lmod
-# modules: a serial flavor and hierarchical flavors under each MPI:
-#   apps/sparta/<tag>-gnu.lua                (serial)
-#   mpi/mpich/<mpi>/sparta/<tag>.lua
-#   mpi/openmpi/<mpi>/sparta/<tag>.lua
+# modules: a serial flavor and hierarchical flavors under EVERY MPI version:
+#   apps/sparta/<tag>-gnu.lua                       (serial)
+#   mpi/mpich/<mpiver>/sparta/<tag>.lua
+#   mpi/openmpi/<mpiver>/sparta/<tag>.lua
+# Software flavor directories encode the MPI version: mpich-4.3.2 etc.
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -33,12 +34,14 @@ build_flavor() {
     local make_target envs=()
     case "$flavor" in
         gnu)     make_target=serial ;;
-        mpich)   make_target=mpi
-                 envs=(env "PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin:$PATH"
-                            "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib") ;;
-        openmpi) make_target=mpi
-                 envs=(env "PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin:$PATH"
-                            "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib") ;;
+        mpich-*) make_target=mpi
+                 mv="${flavor#mpich-}"
+                 envs=(env "PATH=$AUTOMOD_PREFIX/software/mpich/$mv/bin:$PATH"
+                            "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/mpich/$mv/lib") ;;
+        openmpi-*) make_target=mpi
+                 mv="${flavor#openmpi-}"
+                 envs=(env "PATH=$AUTOMOD_PREFIX/software/openmpi/$mv/bin:$PATH"
+                            "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/openmpi/$mv/lib") ;;
     esac
 
     log "sparta [$flavor]: make clean + $make_target"
@@ -66,10 +69,12 @@ run_smoke() {
     local pre=()
     case "$flavor" in
         gnu)     ;;
-        mpich)   pre=(env "PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/bin:$PATH"
-                      "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/mpich/$MPICH_VERSION/lib") ;;
-        openmpi) pre=(env "PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/bin:$PATH"
-                      "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/openmpi/$OPENMPI_VERSION/lib") ;;
+        mpich-*)   mv="${flavor#mpich-}"
+                   pre=(env "PATH=$AUTOMOD_PREFIX/software/mpich/$mv/bin:$PATH"
+                         "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/mpich/$mv/lib") ;;
+        openmpi-*) mv="${flavor#openmpi-}"
+                   pre=(env "PATH=$AUTOMOD_PREFIX/software/openmpi/$mv/bin:$PATH"
+                         "LD_LIBRARY_PATH=$AUTOMOD_PREFIX/software/openmpi/$mv/lib") ;;
     esac
     out="$(timeout 300 "${pre[@]}" "$OUT/bin/sparta" < /dev/null 2>&1 || true)"
     printf '%s\n' "$out" | tail -5 > "/tmp/sparta-$flavor.out"
@@ -116,12 +121,16 @@ build_flavor gnu
 run_smoke gnu
 serial_module
 
-build_flavor mpich
-run_smoke mpich
-mpi_module mpich "$MPICH_VERSION" mpich
+for mv in $MPICH_VERSIONS; do
+    build_flavor "mpich-$mv"
+    run_smoke "mpich-$mv"
+    mpi_module mpich "$mv" "mpich-$mv"
+done
 
-build_flavor openmpi
-run_smoke openmpi
-mpi_module openmpi "$OPENMPI_VERSION" openmpi
+for mv in $OPENMPI_VERSIONS; do
+    build_flavor "openmpi-$mv"
+    run_smoke "openmpi-$mv"
+    mpi_module openmpi "$mv" "openmpi-$mv"
+done
 
-stamp "sparta stack OK (serial + mpich + openmpi)"
+stamp "sparta stack OK (serial + every mpich/openmpi version)"

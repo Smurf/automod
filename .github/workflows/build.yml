@@ -9,6 +9,8 @@ name: build
 on:
   push:
     branches: [main, master, initial]
+    # v* tags additionally publish a GitHub release with the module trees
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -39,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: make tree + intel dirs (podman mounts need them to exist)
-        run: mkdir -p "$TREE" .intel
+        run: mkdir -p "$TREE" ".intel-${{ matrix.os }}"
 
       - name: build container image (podman)
         run: |
@@ -70,10 +72,10 @@ jobs:
       - name: intel oneapi + intel mpi modules
         # /opt/intel must persist across containers (installed by apt in this
         # step; the selftest in the next step mounts it again to use icx/ifx).
-        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/oneapi.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.os }}:/opt/intel" "$TAG" bash /src/build/oneapi.sh
 
       - name: selftest (lmod loads every module)
-        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/selftest.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.os }}:/opt/intel" "$TAG" bash /src/build/selftest.sh
 
       - name: upload build logs (diagnostics)
         if: failure()
@@ -92,3 +94,40 @@ jobs:
           name: automod-modtree-ubuntu-${{ matrix.os }}
           path: automod-modtree-ubuntu-${{ matrix.os }}.tar.gz
           if-no-files-found: error
+
+  release:
+    # Publish the finished module trees as a GitHub release. Triggered by
+    # pushing a v* tag; the modules job must pass for BOTH Ubuntu releases
+    # before anything is published.
+    name: release (publish module trees)
+    needs: modules
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: download built module trees (both releases)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: automod-modtree-ubuntu-*
+          merge-multiple: true
+          path: dist
+
+      - name: checksums
+        run: |
+          cd dist
+          sha256sum "automod-modtree-ubuntu-24.04.tar.gz" \
+                    "automod-modtree-ubuntu-26.04.tar.gz" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --title "automod module tree $TAG" \
+            --generate-notes \
+            dist/automod-modtree-ubuntu-24.04.tar.gz \
+            dist/automod-modtree-ubuntu-26.04.tar.gz \
+            dist/SHA256SUMS
