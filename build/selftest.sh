@@ -112,14 +112,14 @@ if [ -d /opt/intel/oneapi/compiler ] && [ -d /opt/intel/oneapi/mpi ]; then
     # newest compiler + newest mpi: icx-backed wrappers
     cnew="$(echo $ONEAPI_COMPILER_VERSIONS | awk '{print $1}')"
     mnew="$(echo $INTEL_MPI_VERSIONS | awk '{print $1}')"
-    if module load oneapi/$cnew; then
+    if module load "intelmpi/$mnew" && module load "oneapi/$cnew"; then
         check "intelmpi $mnew icx wrapper" env I_MPI_CC=icx I_MPI_CXX=icpx I_MPI_FC=ifx \
             /opt/intel/oneapi/mpi/$mnew/bin/mpiicc \
             "$AUTOMOD_ROOT/tests/assets/mpi-hello.c" -o /tmp/hello-intelmpi-icx
         check "intelmpi $mnew icx mpirun" mpirun -n 2 /tmp/hello-intelmpi-icx
         module purge
     else
-        echo "FAIL: load oneapi/$cnew"; fail=1
+        echo "FAIL: load intelmpi/$mnew + oneapi/$cnew"; fail=1
     fi
 fi
 
