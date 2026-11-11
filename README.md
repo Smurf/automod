@@ -1,9 +1,10 @@
 # automod
 
-A reproducible HPC environment-module stack for Ubuntu clusters, built as
-**lmod** modulefiles. Everything is compiled inside custom container images
-(Ubuntu 24.04 and 26.04) by GitHub Actions using **podman**, so what is tested
-locally is byte-for-byte the pipeline that runs in CI.
+A reproducible HPC environment-module stack for Ubuntu and Rocky Linux
+clusters, built as **lmod** modulefiles. Everything is compiled inside custom
+container images (Ubuntu 24.04, Ubuntu 26.04, Rocky Linux 9) by GitHub
+Actions using **podman**, so what is tested locally is byte-for-byte the
+pipeline that runs in CI.
 
 ## Modules produced
 
@@ -39,6 +40,7 @@ single dynamic interface (`-lmkl_rt`); with a GNU toolchain set
 
 ```
 containers/ubuntu-XX.04/Containerfile   custom builder image (gcc, gfortran, lmod, libfabric)
+containers/rocky-9/Containerfile         Rocky Linux 9 builder image (dnf, EPEL Lmod, CRB)
 build/versions.env                      pinned upstream versions + tarball URLs
 build/*.sh                              one build script per module
 build/selftest.sh                       lmod load + runtime validation of the whole tree
@@ -77,11 +79,13 @@ parallel builds are linked against that exact MPI.
 ./test/local.sh 24.04 sparta.sh  # re-run a single script (builds are
                                  # idempotent, so only missing work repeats)
 ./test/local.sh 26.04            # same pipeline for the next Ubuntu release
+./test/local.sh rocky-9          # Rocky Linux 9 (any containers/<name> dir)
 ```
 
 Each run writes into `./modtree-<os>/` (the module tree) and `./.intel-<os>/`
 (the oneAPI install, mounted as `/opt/intel`). Step-by-step build logs land in
-`./.tmplogs/` for inspection after a failure.
+`./.tmplogs/` for inspection after a failure. The harness is idempotent —
+reruns rebuild only what is missing.
 
 ## Using the result on the cluster
 
@@ -104,7 +108,8 @@ Each run writes into `./modtree-<os>/` (the module tree) and `./.intel-<os>/`
               /opt/automod/modulefiles/compilers
    ```
 
-4. Intel oneAPI/Intel MPI is a binary apt install under `/opt/intel/oneapi`,
+4. Intel oneAPI/Intel MPI/MKL are binary package installs under
+   `/opt/intel/oneapi` (apt on Ubuntu, dnf from Intel's yum repo on Rocky),
    performed by the same container images; the artifact therefore ships its
    modulefiles, while the cluster needs the matching Intel runtime packages
    (Intel MPI runtime + libfabric) installed at `/opt/intel` separately.
@@ -119,11 +124,12 @@ See `build/versions.env` for the full version matrix: mpich 4.3.2/4.2.3,
 Open MPI 4.1.8/4.1.6, HDF5 1.14.6, netCDF-C 4.9.3/4.9.2 with netCDF-Fortran
 4.6.2/4.6.1 (paired by index), and Intel oneAPI compiler 2026.2/2025.3,
 Intel MPI 2021.19/2021.18, MKL 2026.2/2025.3 installed side by side from
-versioned apt packages. SPARTA tag 27Aug2026 is built against each MPI
+versioned packages (apt on Ubuntu, dnf from Intel's yum repo on Rocky).
+SPARTA tag 27Aug2026 is built against each MPI
 version. To add a version, extend the list in `versions.env` — the build
 scripts, modulefiles and selftest pick it up automatically.
 
-## Supported Ubuntu releases
+## Supported OS releases
 
-24.04 (noble) and 26.04 — both built on every push, PR, weekly schedule, and
-`workflow_dispatch`.
+Ubuntu 24.04 (noble), Ubuntu 26.04, and Rocky Linux 9 — all built on every
+push, PR, weekly schedule, and `workflow_dispatch`.
