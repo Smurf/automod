@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: make tree + intel dirs (podman mounts need them to exist)
-        run: mkdir -p "$TREE" .intel
+        run: mkdir -p "$TREE" ".intel-${{ matrix.os }}"
 
       - name: build container image (podman)
         run: |
@@ -70,10 +70,10 @@ jobs:
       - name: intel oneapi + intel mpi modules
         # /opt/intel must persist across containers (installed by apt in this
         # step; the selftest in the next step mounts it again to use icx/ifx).
-        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/oneapi.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.os }}:/opt/intel" "$TAG" bash /src/build/oneapi.sh
 
       - name: selftest (lmod loads every module)
-        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel:/opt/intel" "$TAG" bash /src/build/selftest.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.os }}:/opt/intel" "$TAG" bash /src/build/selftest.sh
 
       - name: upload build logs (diagnostics)
         if: failure()
