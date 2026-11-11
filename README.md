@@ -86,7 +86,13 @@ Each run writes into `./modtree-<os>/` (the module tree) and `./.intel-<os>/`
 ## Using the result on the cluster
 
 1. Download the `automod-modtree-ubuntu-<rel>` artifact from a successful
-   GitHub Actions run.
+   GitHub Actions run — or, easier, grab both tarballs (plus `SHA256SUMS`)
+   from a published **GitHub release**: push a `v*` tag and the workflow
+   builds both Ubuntu releases and attaches them, e.g.
+
+   ```bash
+   git tag v2026.11 && git push origin v2026.11
+   ```
 2. Extract it at the filesystem root on the cluster: `tar -xf automod-modtree-ubuntu-24.04.tar.gz -C /`
    (trees are built to live under `/opt/automod`).
 3. Make lmod aware of it — each scope directory is its own MODULEPATH root:
