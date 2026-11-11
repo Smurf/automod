@@ -14,6 +14,17 @@ for MPVER in $OPENMPI_VERSIONS; do
         rm -rf "/tmp/build/openmpi-$MPVER" && mkdir -p "/tmp/build/openmpi-$MPVER" \
             && cd "/tmp/build/openmpi-$MPVER" && tar -xzf "$tarball" --strip-components=1
 
+        # Open MPI < 4.1.7 relies on libfabric's rdma/fabric.h providing the
+        # container_of macro; newer libfabric (Ubuntu 26.04) dropped it, and
+        # the mtl/ofi MTL then fails with "implicit declaration of function
+        # 'container_of'". 4.1.7+ include opal/util/misc.h, which carries the
+        # same fallback definition — apply that include to older trees.
+        if [ -f ompi/mca/mtl/ofi/mtl_ofi.h ] \
+            && ! grep -q 'opal/util/misc.h' ompi/mca/mtl/ofi/mtl_ofi.h; then
+            sed -i '/#include "opal\/util\/show_help.h"/a #include "opal\/util\/misc.h"' \
+                ompi/mca/mtl/ofi/mtl_ofi.h
+        fi
+
         sl "configure openmpi $MPVER (internal pmix/prrte/hwloc/libevent, gcc)" \
             "$LOGDIR/openmpi-$MPVER-configure.log" "/tmp/build/openmpi-$MPVER" \
             env CC=gcc CXX=g++ FC=gfortran F77=gfortran F90=gfortran \
