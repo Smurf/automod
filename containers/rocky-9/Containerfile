@@ -5,13 +5,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Base toolchain + libraries for compiling the automod module stack.
 # EPEL provides Lmod, CRB provides libfabric-devel; everything built here is
-# produced and validated inside this same container.
+# produced and validated inside this same container. The base image ships
+# curl-minimal (full `curl` conflicts with it); its libcurl supports all the
+# options our fetch helpers use.
 RUN dnf -q install -y epel-release dnf-plugins-core \
     && dnf -q config-manager --set-enabled crb \
     && dnf -q install -y \
         gcc gcc-c++ gcc-gfortran \
         make cmake pkgconf-pkg-config \
-        wget curl ca-certificates gnupg2 \
+        wget ca-certificates gnupg2 \
         tar gzip xz bzip2 unzip file m4 perl \
         bison flex findutils procps \
         zlib-devel libfabric libfabric-devel \
