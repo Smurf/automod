@@ -8,10 +8,10 @@ name: build
 
 on:
   push:
-    branches: [main, master, initial]
+    branches: [main, master]
     # v* tags additionally publish a GitHub release with the module trees
     tags: ["v*"]
-  pull_request:
+  #pull_request:
   workflow_dispatch:
   schedule:
     # weekly rebuild to catch upstream changes
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   modules:
     name: modules (${{ matrix.image }})
-    runs-on: ubuntu-24.04
+    runs-on: automod-gh-runner
     strategy:
       fail-fast: false
       matrix:
