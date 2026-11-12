@@ -27,7 +27,7 @@ concurrency:
 jobs:
   modules:
     name: modules (${{ matrix.image }})
-    runs-on: automod-gh-runner
+    runs-on: [self-hosted, automod-gh-runner]
     strategy:
       fail-fast: false
       matrix:
