@@ -37,19 +37,43 @@ ensure_oneapi_versions() {
     done
     [ "$need" = 1 ] || return 0
 
-    log "oneapi: adding intel apt repo"
-    install -d -m 0755 /usr/share/keyrings
-    curl --fail --retry 3 --show-error --silent --location \
-        https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-        | gpg --dearmor --yes -o /usr/share/keyrings/intel-oneapi.gpg
-    printf 'deb [ signed-by=/usr/share/keyrings/intel-oneapi.gpg ] https://apt.repos.intel.com/oneapi all main\n' \
-        > /etc/apt/sources.list.d/intel-oneapi.list
-    sl "apt-get update (incl. intel repo)" "$LOGDIR/oneapi-apt-update.log" - \
-        bash -c 'apt-get update -o Dir::Etc::SourceParts=/etc/apt/sources.list.d -o APT::Get::List-Cleanup=0 || apt-get update'
+    setup_intel_repo_and_install "${pkgs[@]}"
+}
 
-    log "oneapi: installing ${#pkgs[@]} versioned packages (this is a large download)"
-    sl "apt-get install oneapi packages" "$LOGDIR/oneapi-apt-install.log" - \
-        env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${pkgs[@]}"
+# Both the apt repo (Ubuntu) and the yum repo (Rocky/EL) publish the same
+# versioned packages, which install into per-version directories
+# (/opt/intel/oneapi/<component>/<ver>) so several versions coexist.
+setup_intel_repo_and_install() {
+    if command -v apt-get >/dev/null 2>&1; then
+        log "oneapi: adding intel apt repo"
+        install -d -m 0755 /usr/share/keyrings
+        curl --fail --retry 3 --show-error --silent --location \
+            https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor --yes -o /usr/share/keyrings/intel-oneapi.gpg
+        printf 'deb [ signed-by=/usr/share/keyrings/intel-oneapi.gpg ] https://apt.repos.intel.com/oneapi all main\n' \
+            > /etc/apt/sources.list.d/intel-oneapi.list
+        sl "apt-get update (incl. intel repo)" "$LOGDIR/oneapi-apt-update.log" - \
+            bash -c 'apt-get update -o Dir::Etc::SourceParts=/etc/apt/sources.list.d -o APT::Get::List-Cleanup=0 || apt-get update'
+
+        log "oneapi: installing ${#pkgs[@]} versioned packages (this is a large download)"
+        sl "apt-get install oneapi packages" "$LOGDIR/oneapi-apt-install.log" - \
+            env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
+    elif command -v dnf >/dev/null 2>&1; then
+        log "oneapi: adding intel yum repo"
+        sl "rpm import intel gpg key" "$LOGDIR/oneapi-rpm-key.log" - \
+            rpm --import https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
+        # repo_gpgcheck=0: Intel's repomd signature does not verify against
+        # the published key; package signatures are still checked (gpgcheck=1).
+        printf '[intel-oneapi]\nname=Intel oneAPI\nbaseurl=https://yum.repos.intel.com/oneapi\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=0\n' \
+            > /etc/yum.repos.d/intel-oneapi.repo
+
+        log "oneapi: dnf installing ${#pkgs[@]} versioned packages (this is a large download)"
+        sl "dnf install oneapi packages" "$LOGDIR/oneapi-dnf-install.log" - \
+            dnf -y install --setopt=install_weak_deps=False "$@"
+    else
+        echo "ERROR: no supported package manager (apt-get / dnf) found" >&2
+        exit 1
+    fi
 }
 
 # Pinned versions of a component (from versions.env), newest first.

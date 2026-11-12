@@ -15,7 +15,11 @@ ensure_libfabric_shim() {
         return 0
     fi
     mkdir -p /tmp/libfabric-shim/lib/pkgconfig
-    pcfile="$(find /usr/lib -name libfabric.pc | head -1)"
+    pcfile="$(find /usr/lib /usr/lib64 -name libfabric.pc 2>/dev/null | head -1)"
+    if [ -z "$pcfile" ]; then
+        echo "ERROR: libfabric.pc not found under /usr/lib(64) — install libfabric-devel" >&2
+        exit 1
+    fi
     sed '/^Libs.private:/d' "$pcfile" > /tmp/libfabric-shim/lib/pkgconfig/libfabric.pc
 }
 

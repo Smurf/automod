@@ -1,17 +1,17 @@
 name: build
 
-# Build the automod HPC module stack for both supported Ubuntu releases.
+# Build the automod HPC module stack for every supported OS (matrix below).
 # Each matrix job builds the custom container image for its release with
-# podman, then compiles + validates every module inside that container.
+# with podman, then compiles + validates every module inside that container.
 # At the end the finished /opt/automod tree is uploaded as an artifact for
 # deployment to the cluster.
 
 on:
   push:
-    branches: [main, master, initial]
+    branches: [main, master]
     # v* tags additionally publish a GitHub release with the module trees
     tags: ["v*"]
-  pull_request:
+  #pull_request:
   workflow_dispatch:
   schedule:
     # weekly rebuild to catch upstream changes
@@ -26,28 +26,29 @@ concurrency:
 
 jobs:
   modules:
-    name: modules (ubuntu-${{ matrix.os }})
-    runs-on: ubuntu-24.04
+    name: modules (${{ matrix.image }})
+    runs-on: [self-hosted, automod-gh-runner]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: "24.04", suffix: "24.04" }
-          - { os: "26.04", suffix: "26.04" }
+          - image: "ubuntu-24.04"
+          - image: "ubuntu-26.04"
+          - image: "rocky-9"
     env:
-      TAG: automod:ubuntu-${{ matrix.os }}
-      TREE: modtree-${{ matrix.os }}
+      TAG: automod:${{ matrix.image }}
+      TREE: modtree-${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 
       - name: make tree + intel dirs (podman mounts need them to exist)
-        run: mkdir -p "$TREE" ".intel-${{ matrix.os }}"
+        run: mkdir -p "$TREE" ".intel-${{ matrix.image }}"
 
       - name: build container image (podman)
         run: |
           podman build --quiet -t "$TAG" \
-            -f "containers/ubuntu-${{ matrix.os }}/Containerfile" \
-            "containers/ubuntu-${{ matrix.os }}"
+            -f "containers/${{ matrix.image }}/Containerfile" \
+            "containers/${{ matrix.image }}"
 
       - name: image sanity check
         run: |
@@ -72,62 +73,80 @@ jobs:
       - name: intel oneapi + intel mpi modules
         # /opt/intel must persist across containers (installed by apt in this
         # step; the selftest in the next step mounts it again to use icx/ifx).
-        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.os }}:/opt/intel" "$TAG" bash /src/build/oneapi.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.image }}:/opt/intel" "$TAG" bash /src/build/oneapi.sh
 
       - name: selftest (lmod loads every module)
-        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.os }}:/opt/intel" "$TAG" bash /src/build/selftest.sh
+        run: podman run --rm --workdir /src -e LOGDIR=/src/.tmplogs -v "$PWD:/src" -v "$PWD/$TREE:/opt/automod" -v "$PWD/.intel-${{ matrix.image }}:/opt/intel" "$TAG" bash /src/build/selftest.sh
 
       - name: upload build logs (diagnostics)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-ubuntu-${{ matrix.os }}
+          name: build-logs-${{ matrix.image }}
           path: .tmplogs/
           if-no-files-found: ignore
 
       - name: package module tree
-        run: tar -czf "automod-modtree-ubuntu-${{ matrix.os }}.tar.gz" -C "$TREE" .
+        run: tar -czf "automod-modtree-${{ matrix.image }}.tar.gz" -C "$TREE" .
 
       - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: automod-modtree-ubuntu-${{ matrix.os }}
-          path: automod-modtree-ubuntu-${{ matrix.os }}.tar.gz
+          name: automod-modtree-${{ matrix.image }}
+          path: automod-modtree-${{ matrix.image }}.tar.gz
           if-no-files-found: error
 
   release:
-    # Publish the finished module trees as a GitHub release. Triggered by
-    # pushing a v* tag; the modules job must pass for BOTH Ubuntu releases
-    # before anything is published.
+    # Publish the finished module trees as GitHub releases. The modules job
+    # must pass for every matrix entry before anything is published:
+    #   - v* tag push  -> versioned release with generated notes
+    #   - main builds  -> rolling "latest" release, replaced on every build
+    #     (also covers workflow_dispatch and the weekly schedule, which run
+    #      on the default branch). PR runs build artifacts only.
     name: release (publish module trees)
     needs: modules
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: download built module trees (both releases)
+      - name: download built module trees (all OS releases)
         uses: actions/download-artifact@v4
         with:
-          pattern: automod-modtree-ubuntu-*
+          pattern: automod-modtree-*
           merge-multiple: true
           path: dist
 
       - name: checksums
         run: |
           cd dist
-          sha256sum "automod-modtree-ubuntu-24.04.tar.gz" \
-                    "automod-modtree-ubuntu-26.04.tar.gz" > SHA256SUMS
+          sha256sum automod-modtree-*.tar.gz > SHA256SUMS
           cat SHA256SUMS
 
-      - name: create GitHub release
+      - name: publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
         run: |
-          gh release create "$TAG" \
-            --title "automod module tree $TAG" \
-            --generate-notes \
-            dist/automod-modtree-ubuntu-24.04.tar.gz \
-            dist/automod-modtree-ubuntu-26.04.tar.gz \
-            dist/SHA256SUMS
+          set -e
+          files=(dist/automod-modtree-*.tar.gz dist/SHA256SUMS)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            gh release create "$TAG" \
+              --title "automod module tree $TAG" \
+              --generate-notes \
+              "${files[@]}"
+          else
+            notes="Rolling build of main at ${SHA:0:12}.
+
+          Contains the finished module trees for every supported OS release;
+          extract at / (trees live under /opt/automod) and register the
+          modulefiles roots with \`module use\` — see the README."
+            # replace the previous rolling release entirely (incl. its tag)
+            gh release delete latest --yes --cleanup-tag >/dev/null 2>&1 || true
+            gh release create latest \
+              --target "$SHA" \
+              --title "automod module tree (latest)" \
+              --notes "$notes" \
+              "${files[@]}"
+          fi
