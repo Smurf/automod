@@ -27,7 +27,7 @@ concurrency:
 jobs:
   modules:
     name: modules (${{ matrix.image }})
-    runs-on: [self-hosted, linux, x64, automog-gh-runner]
+    runs-on: [self-hosted, linux, x64, automod-gh-runner]
     strategy:
       fail-fast: false
       matrix:
@@ -106,7 +106,7 @@ jobs:
     name: release (publish module trees)
     needs: modules
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, automod-gh-runner]
     permissions:
       contents: write
     steps:
